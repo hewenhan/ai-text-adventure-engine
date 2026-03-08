@@ -1,0 +1,5 @@
+{
+  "name": "NexusTale AI RPG",
+  "description": "An AI-powered text-based RPG featuring dynamic tension pacing, inventory management, and real-time scene image generation. Built with React and the Gemini API.",
+  "requestFramePermissions": []
+}
