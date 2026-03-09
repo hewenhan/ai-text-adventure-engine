@@ -36,7 +36,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // Basic validation
       if (!parsed.history || !Array.isArray(parsed.history)) return false;
       
-      // Migration for old saves: Ensure new fields exist, remove extra fields
+      // Migration for old saves: Ensure new fields exist
       const migratedState: GameState = {
         characterSettings: parsed.characterSettings ?? INITIAL_STATE.characterSettings,
         worldview: parsed.worldview ?? INITIAL_STATE.worldview,
@@ -47,12 +47,22 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         loadingMessages: parsed.loadingMessages || DEFAULT_LOADING_MESSAGES,
         language: parsed.language || INITIAL_STATE.language,
         
-        // Consolidate inventory into status
-        status: {
-          ...INITIAL_STATE.status,
-          ...(parsed.status || {}),
-          inventory: parsed.status?.inventory || parsed.inventory || []
-        },
+        // New survival fields (with migration from old saves)
+        hp: typeof parsed.hp === 'number' ? parsed.hp : (parsed.status?.health ?? 100),
+        lives: typeof parsed.lives === 'number' ? parsed.lives : 3,
+        isGameOver: parsed.isGameOver ?? false,
+        inventory: Array.isArray(parsed.inventory) ? parsed.inventory : (parsed.status?.inventory || []),
+        status: parsed.status ?? {},
+
+        // Spatial fields
+        worldData: parsed.worldData ?? null,
+        mapImageUrl: parsed.mapImageUrl ?? null,
+        currentWorldId: parsed.currentWorldId ?? null,
+        currentNodeId: parsed.currentNodeId ?? null,
+        currentHouseId: parsed.currentHouseId ?? null,
+
+        // Progress
+        progressMap: parsed.progressMap ?? {},
 
         // Migration for pacingState
         pacingState: {
@@ -64,7 +74,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             : INITIAL_STATE.pacingState.turnsInCurrentLevel
         },
         
-        // Migration for history: Ensure all messages have IDs and remove extra fields
+        // Migration for history: Ensure all messages have IDs
         history: Array.isArray(parsed.history) 
           ? parsed.history.map((msg: any) => ({
               id: msg.id || uuidv4(),
@@ -73,8 +83,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
               imageFileName: msg.imageFileName,
               timestamp: msg.timestamp || Date.now(),
               pacingState: msg.pacingState,
-              status: msg.status ? { ...msg.status, inventory: msg.status.inventory || msg.inventory || [] } : undefined,
+              hp: msg.hp,
+              inventory: msg.inventory,
+              status: msg.status,
               currentSceneVisuals: msg.currentSceneVisuals,
+              currentNodeId: msg.currentNodeId,
+              currentHouseId: msg.currentHouseId,
               debugState: msg.debugState,
               bgmKey: msg.bgmKey
             }))
@@ -104,7 +118,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         ...message,
         // Snapshot current game state into the message for rollback/undo support
         pacingState: prev.pacingState,
-        status: prev.status
+        hp: prev.hp,
+        inventory: [...prev.inventory],
+        status: prev.status,
+        currentNodeId: prev.currentNodeId ?? undefined,
+        currentHouseId: prev.currentHouseId
       }]
     }));
   };

@@ -1,4 +1,5 @@
 import { ai, TEXT_MODEL, IMAGE_MODEL } from '../lib/gemini';
+import type { IntentResult, WorldData } from '../types/game';
 
 export async function generateSummary(currentSummary: string, messagesToSummarize: any[], language: 'zh' | 'en' = 'zh'): Promise<string | undefined> {
   const textToSummarize = messagesToSummarize.map(m => `${m.role}: ${m.text}`).join('\n');
@@ -168,4 +169,119 @@ export async function fetchCustomLoadingMessages(worldview: string, language: 'z
     }
   }
   throw new Error("Failed to generate loading messages");
+}
+
+/**
+ * Step 1 of the two-step pipeline: Intent Router.
+ * Uses a fast model to classify the user's action into an intent category.
+ */
+export async function extractIntent(
+  userInput: string,
+  currentNodeId: string,
+  currentHouseId: string | null,
+  visibleContext: string,
+  connectedNodeIds: string[],
+  language: 'zh' | 'en' = 'zh'
+): Promise<IntentResult> {
+  const prompt = `You are an intent classifier for a text adventure game. Classify the player's action into ONE intent category.
+
+Current Location: Node "${currentNodeId}", House "${currentHouseId || 'outdoors'}"
+Visible Environment: ${visibleContext}
+Connected Nodes the player can move to: ${connectedNodeIds.join(', ')}
+
+Player Input: "${userInput}"
+
+Intent Categories:
+- "idle": Resting, chatting, socializing, examining self, non-action activities
+- "explore": Searching, investigating, looting, opening containers, examining surroundings
+- "combat": Fighting, attacking, using weapons, defending against threats
+- "suicidal_idle": Reckless/self-destructive behavior in a dangerous area
+- "move": Any movement to a different location (includes retreat, fleeing, traveling). You MUST extract the target node/house ID if mentioned.
+
+Return ONLY a JSON object: { "intent": "idle|explore|combat|suicidal_idle|move", "targetId": "nodeId_or_null" }
+If the player wants to move but doesn't specify a clear connected destination, set targetId to null.
+No markdown formatting.`;
+
+  const result = await ai.models.generateContent({
+    model: TEXT_MODEL,
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: { responseMimeType: 'application/json' }
+  });
+
+  const text = result.text;
+  if (!text) return { intent: 'idle', targetId: null };
+
+  try {
+    const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move'];
+    if (validIntents.includes(parsed.intent)) {
+      return { intent: parsed.intent, targetId: parsed.targetId || null };
+    }
+  } catch (e) {
+    console.error("Intent extraction parse error", e);
+  }
+  return { intent: 'idle', targetId: null };
+}
+
+/**
+ * Phase 0: Generate complete world topology data (10 nodes with houses).
+ * Called once during game initialization.
+ */
+export async function generateWorldData(worldview: string, language: 'zh' | 'en' = 'zh'): Promise<WorldData> {
+  const langInstruction = language === 'zh' ? 'All names and descriptions MUST be in Chinese.' : 'All names and descriptions MUST be in English.';
+  const prompt = `You are an expert world builder for a text adventure RPG.
+
+Worldview: "${worldview}"
+
+Task: Generate a complete topology map for this world with EXACTLY 10 nodes (locations) and multiple houses (buildings/places) within each node.
+
+RULES:
+- Each node must have 1-3 houses.
+- Nodes must form a connected graph (every node reachable from every other node via connections).
+- Node types: "city", "town", "village", "wilderness"
+- House types: "housing", "shop", "inn", "facility"
+- Safety levels: "safe", "low", "medium", "high", "deadly"
+- The first node (n1) MUST be a safe starting village/camp.
+- The last few nodes should be increasingly dangerous (high/deadly).
+- Connections should form a branching path, not a straight line.
+
+${langInstruction}
+
+Return ONLY a JSON object with this EXACT structure (no markdown):
+{
+  "id": "w1",
+  "name": "WorldName",
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "Name",
+      "type": "village",
+      "safetyLevel": "safe",
+      "connections": ["n2"],
+      "houses": [
+        { "id": "h1_1", "name": "HouseName", "type": "facility", "safetyLevel": "safe" }
+      ]
+    }
+  ]
+}`;
+
+  const result = await ai.models.generateContent({
+    model: TEXT_MODEL,
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: { responseMimeType: 'application/json' }
+  });
+
+  const text = result.text;
+  if (!text) throw new Error("Failed to generate world data");
+
+  const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  const parsed = JSON.parse(cleaned);
+
+  // Validate basic structure
+  if (!parsed.nodes || !Array.isArray(parsed.nodes) || parsed.nodes.length === 0) {
+    throw new Error("Invalid world data structure");
+  }
+
+  return parsed as WorldData;
 }

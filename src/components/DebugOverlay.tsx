@@ -55,20 +55,55 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ state }) => {
             </span>
           </div>
 
+          {/* HP & Lives */}
+          <div>
+            <span className="text-gray-400">HP:</span>{' '}
+            <span className={state.hp <= 30 ? 'text-red-400 font-bold' : 'text-green-300'}>
+              {state.hp}/100
+            </span>
+            <span className="ml-2 text-gray-400">Lives:</span>{' '}
+            <span className="text-yellow-300">{state.lives}</span>
+            {state.isGameOver && <span className="text-red-500 font-bold ml-2">GAME OVER</span>}
+          </div>
+
+          {/* Location */}
+          <div>
+            <span className="text-gray-400">Node:</span>{' '}
+            <span className="text-cyan-300">{state.currentNodeId || 'null'}</span>
+            <span className="ml-2 text-gray-400">House:</span>{' '}
+            <span className="text-cyan-300">{state.currentHouseId || 'outdoor'}</span>
+          </div>
+
           {debugState ? (
             <>
               <div className="border-t border-gray-700 pt-2 mt-2">
                 <div className="text-gray-300 font-bold mb-1">LAST TURN STATS</div>
                 <div className="grid grid-cols-2 gap-1">
-                  <div>Roll:</div>
-                  <div className={debugState.lastActionRoll >= debugState.lastSuccessThreshold ? 'text-green-400' : 'text-red-400'}>
-                    {debugState.lastActionRoll} (Target: {debugState.lastSuccessThreshold})
+                  <div>D20 Roll:</div>
+                  <div className={debugState.lastIsSuccess ? 'text-green-400' : 'text-red-400'}>
+                    {debugState.lastActionRoll}
                   </div>
                   
                   <div>Result:</div>
                   <div>{debugState.lastIsSuccess ? 'SUCCESS' : 'FAILURE'}</div>
+
+                  {debugState.lastIntent && (
+                    <>
+                      <div>Intent:</div>
+                      <div className="text-purple-300">{debugState.lastIntent}</div>
+                    </>
+                  )}
                 </div>
               </div>
+
+              {debugState.lastNarrativeInstruction && (
+                <div className="border-t border-gray-700 pt-2 mt-2">
+                  <div className="text-gray-300 font-bold mb-1">NARRATIVE INSTRUCTION</div>
+                  <div className="text-yellow-200 text-[10px] max-h-16 overflow-y-auto">
+                    {debugState.lastNarrativeInstruction}
+                  </div>
+                </div>
+              )}
 
               <div className="border-t border-gray-700 pt-2 mt-2">
                 <div className="text-gray-300 font-bold mb-1">IMAGE GEN STATUS</div>
@@ -97,8 +132,9 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ state }) => {
           
           <div className="border-t border-gray-700 pt-2 mt-2">
              <div className="text-gray-300 font-bold mb-1">PLAYER STATUS</div>
-             <div>Health: {state.status.health}</div>
-             <div>Inventory: {(state.status.inventory || []).length} items</div>
+             <div>HP: {state.hp}/100 | Lives: {state.lives}</div>
+             <div>Inventory: {state.inventory.length} items</div>
+             <div>Progress Keys: {Object.keys(state.progressMap).length}</div>
           </div>
         </div>
       </div>

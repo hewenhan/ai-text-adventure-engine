@@ -13,7 +13,7 @@ import { ChatInput } from '../components/ChatInput';
 import { ProfileModal } from '../components/ProfileModal';
 import { StatusSidebar } from '../components/StatusSidebar';
 import { FleshingOutOverlay } from '../components/FleshingOutOverlay';
-import { fleshOutCharacterProfile, fetchCustomLoadingMessages } from '../services/aiService';
+import { fleshOutCharacterProfile, fetchCustomLoadingMessages, generateWorldData } from '../services/aiService';
 
 export default function Chat() {
   const { state, updateState, exportSave } = useGame();
@@ -106,6 +106,37 @@ export default function Chat() {
     fleshOutCharacter();
   }, [state.characterSettings, state.worldview]);
 
+  // World Data Generation: generate topology map if not present
+  const [isGeneratingWorld, setIsGeneratingWorld] = useState(false);
+  useEffect(() => {
+    const generateWorld = async () => {
+      if (!state.worldData && state.worldview && !isGeneratingWorld) {
+        setIsGeneratingWorld(true);
+        try {
+          const worldData = await generateWorldData(state.worldview, state.language);
+          // Spawn Rule: player starts in first node's first house, force it safe
+          const spawnNode = worldData.nodes[0];
+          const spawnHouse = spawnNode?.houses[0];
+          if (spawnHouse) {
+            spawnHouse.safetyLevel = 'safe';
+          }
+          updateState({
+            worldData,
+            currentWorldId: worldData.id,
+            currentNodeId: spawnNode?.id || null,
+            currentHouseId: spawnHouse?.id || null,
+            pacingState: { tensionLevel: 0, turnsInCurrentLevel: 0 }
+          });
+        } catch (error) {
+          console.error("Failed to generate world data", error);
+        } finally {
+          setIsGeneratingWorld(false);
+        }
+      }
+    };
+    generateWorld();
+  }, [state.worldview, state.worldData]);
+
   useEffect(() => {
     const fetchMissingLoadingMessages = async () => {
       const isUsingDefaults = state.loadingMessages === DEFAULT_LOADING_MESSAGES || 
@@ -170,15 +201,19 @@ export default function Chat() {
         newPacingState = { tensionLevel: 0, turnsInCurrentLevel: 0 };
       }
 
+      const newHp = lastMessage?.hp ?? (newHistory.length === 0 ? INITIAL_STATE.hp : state.hp);
+      const newInventory = lastMessage?.inventory ?? (newHistory.length === 0 ? INITIAL_STATE.inventory : state.inventory);
       const newStatus = lastMessage?.status ?? (newHistory.length === 0 ? INITIAL_STATE.status : state.status);
 
       updateState({ 
         history: newHistory,
         pacingState: newPacingState,
+        hp: newHp,
+        inventory: newInventory,
         status: newStatus
       });
     }
-  }, [state.history, state.pacingState, state.status, updateState]);
+  }, [state.history, state.pacingState, state.hp, state.inventory, state.status, updateState]);
 
   const characterName = state.characterSettings.name || 'AI';
 
@@ -234,6 +269,9 @@ export default function Chat() {
                   />
                 ))}
               </div>
+              <span className={`text-xs ${state.hp <= 30 ? 'text-red-400' : state.hp <= 60 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                HP {state.hp}
+              </span>
             </div>
           </div>
         </div>
@@ -338,7 +376,7 @@ export default function Chat() {
       </AnimatePresence>
       
       <AnimatePresence>
-        {isFleshingOutCharacter && <FleshingOutOverlay />}
+        {(isFleshingOutCharacter || isGeneratingWorld) && <FleshingOutOverlay />}
       </AnimatePresence>
 
       <DebugOverlay state={state} />

@@ -1,8 +1,46 @@
+// --- Spatial Topology Types ---
+export type NodeType = 'city' | 'town' | 'village' | 'wilderness';
+export type HouseType = 'housing' | 'shop' | 'inn' | 'facility';
+export type SafetyLevel = 'safe' | 'low' | 'medium' | 'high' | 'deadly';
+
+export interface HouseData {
+  id: string;
+  name: string;
+  type: HouseType;
+  safetyLevel: SafetyLevel;
+}
+
+export interface NodeData {
+  id: string;
+  name: string;
+  type: NodeType;
+  safetyLevel: SafetyLevel;
+  connections: string[];
+  houses: HouseData[];
+}
+
+export interface WorldData {
+  id: string;
+  name: string;
+  nodes: NodeData[];
+}
+
+// --- Intent Types ---
+export type IntentType = 'idle' | 'explore' | 'combat' | 'suicidal_idle' | 'move';
+
+export interface IntentResult {
+  intent: IntentType;
+  targetId: string | null;
+}
+
+// --- Debug & Profile ---
 export interface DebugState {
   lastActionRoll: number;
   lastSuccessThreshold: number;
   lastIsSuccess: boolean;
   lastTensionLevel: number;
+  lastIntent?: IntentType;
+  lastNarrativeInstruction?: string;
   lastImagePrompt?: string;
   lastImageError?: string;
 }
@@ -17,44 +55,68 @@ export interface CharacterProfile {
   isFleshedOut: boolean;
 }
 
-export interface GameState {
-  characterSettings: CharacterProfile;
-  worldview: string;
-  history: ChatMessage[];
-  status: Record<string, any>;
-  isFirstRun: boolean;
-  summary: string;
-  turnsSinceLastSummary: number;
-  playerProfile?: PlayerProfile;
-  loadingMessages: string[];
-  language: 'zh' | 'en';
-  pacingState: {
-    tensionLevel: 0 | 1 | 2 | 3 | 4;
-    turnsInCurrentLevel: number;
-  };
-}
-
 export interface PlayerProfile {
   name: string;
   gender: 'Male' | 'Female' | 'Non-binary' | 'Other';
   orientation: 'Heterosexual' | 'Homosexual' | 'Bisexual' | 'Pansexual' | 'Asexual' | 'Other';
 }
 
+// --- Core Game State ---
+export interface GameState {
+  // 1. Original base fields
+  characterSettings: CharacterProfile;
+  worldview: string;
+  history: ChatMessage[];
+  isFirstRun: boolean;
+  summary: string;
+  turnsSinceLastSummary: number;
+  playerProfile?: PlayerProfile;
+  loadingMessages: string[];
+  language: 'zh' | 'en';
+
+  // 2. Core survival & economy values (TS-controlled)
+  hp: number;             // (0-100)
+  lives: number;          // Revival tokens, 0 = permanent death
+  isGameOver: boolean;
+  inventory: string[];    // Explicit backpack
+  status: Record<string, any>; // Soft statuses only (e.g. wet, bleeding)
+
+  // 3. Global map & spatial pointers
+  worldData: WorldData | null;
+  mapImageUrl: string | null;
+  currentWorldId: string | null;
+  currentNodeId: string | null;
+  currentHouseId: string | null; // null = outdoors in Node
+
+  // 4. Multi-dimensional exploration progress
+  progressMap: Record<string, number>; // e.g. {"node_n1": 100, "house_h2_1": 45}
+
+  // 5. Pacing state machine
+  pacingState: {
+    tensionLevel: 0 | 1 | 2 | 3 | 4;
+    turnsInCurrentLevel: number;
+  };
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
-  imageFileName?: string; // Only the filename in Drive
+  imageFileName?: string;
   timestamp: number;
   // Snapshot of game state AFTER this message was processed
   pacingState?: {
     tensionLevel: 0 | 1 | 2 | 3 | 4;
     turnsInCurrentLevel: number;
   };
+  hp?: number;
+  inventory?: string[];
   status?: Record<string, any>;
   currentSceneVisuals?: string;
+  currentNodeId?: string;
+  currentHouseId?: string | null;
   debugState?: DebugState;
-  bgmKey?: string; // BGM file path from BGM_LIST, e.g. "levelBGM/level2_1.mp3"
+  bgmKey?: string;
 }
 
 export const DEFAULT_CHARACTER: CharacterProfile = {
@@ -115,14 +177,32 @@ export const INITIAL_STATE: GameState = {
   characterSettings: DEFAULT_CHARACTER,
   worldview: "",
   history: [],
-  status: { health: 100, inventory: [] },
   isFirstRun: true,
   summary: "",
   turnsSinceLastSummary: 0,
   loadingMessages: DEFAULT_LOADING_MESSAGES,
   language: 'zh',
+
+  // Core survival
+  hp: 100,
+  lives: 3,
+  isGameOver: false,
+  inventory: [],
+  status: {},
+
+  // Spatial pointers
+  worldData: null,
+  mapImageUrl: null,
+  currentWorldId: null,
+  currentNodeId: null,
+  currentHouseId: null,
+
+  // Progress
+  progressMap: {},
+
+  // Pacing – start at tension 0 (absolute safety)
   pacingState: {
-    tensionLevel: 1,
+    tensionLevel: 0,
     turnsInCurrentLevel: 0
   }
 };

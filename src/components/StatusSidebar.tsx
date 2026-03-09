@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { X } from 'lucide-react';
+import { X, Heart, Shield, MapPin } from 'lucide-react';
 import { GameState } from '../types/game';
 
 interface StatusSidebarProps {
@@ -8,6 +8,9 @@ interface StatusSidebarProps {
 }
 
 export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
+  const currentNode = state.worldData?.nodes.find(n => n.id === state.currentNodeId);
+  const currentHouse = currentNode?.houses.find(h => h.id === state.currentHouseId);
+
   return (
     <>
       <motion.div 
@@ -31,13 +34,68 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
         </div>
 
         <div className="space-y-6">
+          {/* HP & Lives */}
+          <div>
+            <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider flex items-center gap-1">
+              <Heart className="w-3.5 h-3.5" /> 生命值
+            </h3>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span>HP</span>
+                <span className={state.hp <= 30 ? 'text-red-400' : state.hp <= 60 ? 'text-amber-400' : 'text-emerald-400'}>
+                  {state.hp} / 100
+                </span>
+              </div>
+              <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${
+                    state.hp <= 30 ? 'bg-red-500' : state.hp <= 60 ? 'bg-amber-500' : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${state.hp}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>复活币</span>
+                <div className="flex gap-1">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Shield key={i} className={`w-4 h-4 ${i < state.lives ? 'text-emerald-400' : 'text-zinc-700'}`} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Current Location */}
+          <div>
+            <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider flex items-center gap-1">
+              <MapPin className="w-3.5 h-3.5" /> 当前位置
+            </h3>
+            <div className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-sm text-zinc-300 space-y-1">
+              {currentNode ? (
+                <>
+                  <div><span className="text-zinc-500">区域：</span>{currentNode.name} ({currentNode.type})</div>
+                  <div><span className="text-zinc-500">危险度：</span>{currentNode.safetyLevel}</div>
+                  {currentHouse && (
+                    <div><span className="text-zinc-500">建筑：</span>{currentHouse.name} ({currentHouse.type})</div>
+                  )}
+                  {!currentHouse && (
+                    <div className="text-zinc-500 italic">户外街区</div>
+                  )}
+                </>
+              ) : (
+                <div className="text-zinc-500 italic">未知</div>
+              )}
+            </div>
+          </div>
+
+          {/* Inventory */}
           <div>
             <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">物品栏</h3>
-            {(!state.status?.inventory || state.status.inventory.length === 0) ? (
+            {state.inventory.length === 0 ? (
               <div className="text-zinc-600 italic text-sm">空</div>
             ) : (
               <ul className="space-y-2">
-                {state.status.inventory.map((item: string, i: number) => (
+                {state.inventory.map((item: string, i: number) => (
                   <li key={i} className="bg-zinc-950 border border-zinc-800 p-2 rounded-lg text-sm">
                     {item}
                   </li>
@@ -46,13 +104,37 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
             )}
           </div>
 
-          <div>
-            <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">角色状态</h3>
-            <pre className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-xs overflow-x-auto">
-              {JSON.stringify(state.status, null, 2)}
-            </pre>
-          </div>
+          {/* Exploration Progress */}
+          {Object.keys(state.progressMap).length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">探索进度</h3>
+              <div className="space-y-2">
+                {Object.entries(state.progressMap).map(([key, val]) => (
+                  <div key={key} className="text-sm">
+                    <div className="flex justify-between text-zinc-300">
+                      <span>{key}</span>
+                      <span>{val}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${val}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
+          {/* Soft Status */}
+          {Object.keys(state.status).length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">状态效果</h3>
+              <pre className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-xs overflow-x-auto">
+                {JSON.stringify(state.status, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {/* World */}
           <div>
             <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">世界观</h3>
             <div className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-sm text-zinc-300">
@@ -60,6 +142,7 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
             </div>
           </div>
 
+          {/* Character Settings */}
           <div>
             <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">角色设定</h3>
             <div className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-sm text-zinc-300 space-y-2">
