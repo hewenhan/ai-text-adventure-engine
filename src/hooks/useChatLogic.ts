@@ -205,13 +205,20 @@ export function useChatLogic() {
         }
       `;
 
+      console.log("Level for AI:", state.pacingState.tensionLevel);
+
+
       const rollText = state.pacingState.tensionLevel === 0 
         ? `Fate Roll: ${actionRoll} (IGNORE unless user performs a RISKY action. Otherwise, just chat/relax.)`
         : `Fate Roll: ${actionRoll} (Use this to determine success/failure of the User Action)`;
 
+      console.log("actionRoll", actionRoll);
+      console.log("successThreshold", successThreshold);
+
       const fullPrompt = `${systemPrompt}\n\nRecent Chat History:\n${historyText}\n\nUser Action: ${userInput}\n${rollText}`;
 
       const responseJson = await generateTurn(fullPrompt);
+      console.log("AI Response JSON:", responseJson);
       const { image_prompt, text_sequence, status_update, scene_visuals_update, pacing_update } = responseJson;
       
       const messages = Array.isArray(text_sequence) ? text_sequence : [responseJson.text_response || "......"];
@@ -237,7 +244,9 @@ export function useChatLogic() {
         newTension = Math.max(0, Math.min(4, newTension));
         
         const isSameLevel = newTension === prev.pacingState.tensionLevel;
+        console.log(isSameLevel);
         const newTurns = isSameLevel ? (prev.pacingState.turnsInCurrentLevel ?? 0) + 1 : 1;
+        console.log(newTurns);
 
         return {
           status: status_update ? { ...prev.status, ...status_update } : prev.status,
