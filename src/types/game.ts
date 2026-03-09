@@ -18,7 +18,7 @@ export interface CharacterProfile {
 }
 
 export interface GameState {
-  characterSettings: string | CharacterProfile;
+  characterSettings: CharacterProfile;
   worldview: string;
   history: ChatMessage[];
   status: Record<string, any>;
@@ -27,6 +27,7 @@ export interface GameState {
   turnsSinceLastSummary: number;
   playerProfile?: PlayerProfile;
   loadingMessages: string[];
+  language: 'zh' | 'en';
   pacingState: {
     tensionLevel: 0 | 1 | 2 | 3 | 4;
     turnsInCurrentLevel: number;
@@ -55,7 +56,15 @@ export interface ChatMessage {
   debugState?: DebugState;
 }
 
-export const DEFAULT_CHARACTER = "23岁白羊座的小女生";
+export const DEFAULT_CHARACTER: CharacterProfile = {
+  name: "林星",
+  gender: "女",
+  description: "23岁白羊座的小女生",
+  personality: "",
+  background: "",
+  hobbies: "",
+  isFleshedOut: false
+};
 export const SUMMARY_THRESHOLD = 20;
 export const KEEP_RECENT_TURNS = 10;
 export const ENABLE_DEBUG_UI = true;
@@ -102,6 +111,7 @@ export const INITIAL_STATE: GameState = {
   summary: "",
   turnsSinceLastSummary: 0,
   loadingMessages: DEFAULT_LOADING_MESSAGES,
+  language: 'zh',
   pacingState: {
     tensionLevel: 1,
     turnsInCurrentLevel: 0

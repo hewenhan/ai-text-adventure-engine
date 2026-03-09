@@ -1,26 +1,27 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useGame } from '../contexts/GameContext';
 import { useAuth } from '../contexts/AuthContext';
-import { ai, TEXT_MODEL, IMAGE_MODEL } from '../lib/gemini';
-import { uploadImageToDrive, getImageUrlByName } from '../lib/drive';
-import { v4 as uuidv4 } from 'uuid';
-import { motion, AnimatePresence } from 'motion/react';
-import { Send, Download, Loader2, Image as ImageIcon, AlertCircle, Backpack, X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import clsx from 'clsx';
-import { SUMMARY_THRESHOLD, KEEP_RECENT_TURNS, PlayerProfile, DEFAULT_LOADING_MESSAGES, INITIAL_STATE } from '../types/game';
+import { AnimatePresence, motion } from 'motion/react';
+import { AlertCircle, Backpack, Loader2, Save } from 'lucide-react';
+import { PlayerProfile, DEFAULT_LOADING_MESSAGES, INITIAL_STATE } from '../types/game';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { ChatMessageItem } from '../components/ChatMessageItem';
 import { DebugOverlay } from '../components/DebugOverlay';
+import { useChatLogic } from '../hooks/useChatLogic';
+import { ChatInput } from '../components/ChatInput';
+import { ProfileModal } from '../components/ProfileModal';
+import { StatusSidebar } from '../components/StatusSidebar';
+import { FleshingOutOverlay } from '../components/FleshingOutOverlay';
+import { fleshOutCharacterProfile, fetchCustomLoadingMessages } from '../services/aiService';
 
 export default function Chat() {
-  const { state, addMessage, exportSave, updateState } = useGame();
-  const { accessToken, isAuthenticated } = useAuth();
-  const [input, setInput] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
+  const { state, updateState, exportSave } = useGame();
+  const { isAuthenticated } = useAuth();
   const [showStatus, setShowStatus] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  
+  const { isProcessing, handleTurn } = useChatLogic();
 
   // Loading Message State
   const [currentLoadingMessage, setCurrentLoadingMessage] = useState(DEFAULT_LOADING_MESSAGES[0]);
@@ -28,18 +29,16 @@ export default function Chat() {
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isProcessing) {
-      // Use custom messages if available, otherwise default
       const messages = state.loadingMessages && state.loadingMessages.length > 0 
         ? state.loadingMessages 
         : DEFAULT_LOADING_MESSAGES;
         
-      // Set initial random message
       setCurrentLoadingMessage(messages[Math.floor(Math.random() * messages.length)]);
 
       interval = setInterval(() => {
         const randomIndex = Math.floor(Math.random() * messages.length);
         setCurrentLoadingMessage(messages[randomIndex]);
-      }, 3000); // Change message every 3 seconds for chat
+      }, 3000);
     }
     return () => clearInterval(interval);
   }, [isProcessing, state.loadingMessages]);
@@ -53,109 +52,41 @@ export default function Chat() {
   // Character Fleshing Out State
   const [isFleshingOutCharacter, setIsFleshingOutCharacter] = useState(false);
 
-  // Check for missing profile on mount
   useEffect(() => {
     if (!state.playerProfile) {
       setShowProfileModal(true);
     }
   }, [state.playerProfile]);
 
-  // Flesh out character settings on mount if needed
   useEffect(() => {
     const fleshOutCharacter = async () => {
-      const needsFleshingOut = 
-        typeof state.characterSettings === 'string' || 
-        (typeof state.characterSettings === 'object' && !state.characterSettings.isFleshedOut);
+      const needsFleshingOut = !state.characterSettings.isFleshedOut;
 
       if (needsFleshingOut && state.worldview && !isFleshingOutCharacter) {
         setIsFleshingOutCharacter(true);
         try {
-          let baseName = "";
-          let baseGender = "";
-          let baseDesc = "";
-
-          if (typeof state.characterSettings === 'string') {
-            baseDesc = state.characterSettings;
-          } else {
-            baseName = state.characterSettings.name;
-            baseGender = state.characterSettings.gender;
-            baseDesc = state.characterSettings.description;
-          }
-
-          const prompt = `
-            You are an expert character designer for a roleplay game.
-            
-            Worldview: "${state.worldview}"
-            Initial Character Info:
-            Name: ${baseName || 'Not specified'}
-            Gender: ${baseGender || 'Not specified'}
-            Description: ${baseDesc || 'Not specified'}
-            
-            Task: Flesh out this character to fit perfectly into the worldview.
-            Provide a complete profile including:
-            1. Name (use the initial name if provided, otherwise invent a fitting one)
-            2. Gender (use the initial gender if provided, otherwise invent a fitting one)
-            3. Description (a short summary of who they are)
-            4. Personality (their traits, quirks, how they act)
-            5. Background (their past experiences, how they got here)
-            6. Hobbies/Skills (what they are good at, what they like to do)
-            
-            Return ONLY a JSON object with this structure:
-            {
-              "name": "string",
-              "gender": "string",
-              "description": "string",
-              "personality": "string",
-              "background": "string",
-              "hobbies": "string"
-            }
-            
-            Translate all content to Chinese.
-            No markdown formatting.
-          `;
+          const profile = await fleshOutCharacterProfile(
+            state.worldview,
+            state.characterSettings.name,
+            state.characterSettings.gender,
+            state.characterSettings.description,
+            state.language
+          );
           
-          const result = await ai.models.generateContent({
-            model: TEXT_MODEL,
-            contents: [{ role: 'user', parts: [{ text: prompt }] }]
+          updateState({ 
+            characterSettings: {
+              ...profile,
+              isFleshedOut: true
+            }
           });
-
-          const text = result.text;
-          if (text) {
-            const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
-            const profile = JSON.parse(jsonStr);
-            
-            updateState({ 
-              characterSettings: {
-                ...profile,
-                isFleshedOut: true
-              }
-            });
-            console.log("Character fleshed out successfully!");
-          }
         } catch (error) {
           console.error("Failed to flesh out character", error);
-          // If it fails, we just mark it as fleshed out so we don't infinitely retry,
-          // but keep the original data.
-          if (typeof state.characterSettings === 'object') {
-            updateState({
-              characterSettings: {
-                ...state.characterSettings,
-                isFleshedOut: true
-              }
-            });
-          } else {
-            updateState({
-              characterSettings: {
-                name: "未知",
-                gender: "未知",
-                description: state.characterSettings,
-                personality: "未知",
-                background: "未知",
-                hobbies: "未知",
-                isFleshedOut: true
-              }
-            });
-          }
+          updateState({
+            characterSettings: {
+              ...state.characterSettings,
+              isFleshedOut: true
+            }
+          });
         } finally {
           setIsFleshingOutCharacter(false);
         }
@@ -165,63 +96,23 @@ export default function Chat() {
     fleshOutCharacter();
   }, [state.characterSettings, state.worldview]);
 
-  // Background task: Fetch custom loading messages if missing (for old saves)
   useEffect(() => {
     const fetchMissingLoadingMessages = async () => {
-      // Only run if we have a worldview but no custom loading messages (using default)
-      // We check if the first message is one of the defaults to determine if we are using defaults
       const isUsingDefaults = state.loadingMessages === DEFAULT_LOADING_MESSAGES || 
                               (state.loadingMessages.length > 0 && DEFAULT_LOADING_MESSAGES.includes(state.loadingMessages[0]));
       
       if (state.worldview && isUsingDefaults && !isProcessing) {
-        console.log("Fetching custom loading messages for old save...");
         try {
-          const prompt = `
-            Current Worldview: "${state.worldview}"
-            
-            Task: Generate 50 short, humorous, immersive "loading screen" messages related to this world theme. 
-            Examples: "Connecting to neural net...", "Polishing slime...", "Calibrating gravity...". 
-            Make them creative and relevant to the specific world theme.
-            
-            Return ONLY a JSON array of strings. No markdown formatting.
-            Translate to Chinese.
-          `;
-          
-          const result = await ai.models.generateContent({
-            model: TEXT_MODEL,
-            contents: [{ role: 'user', parts: [{ text: prompt }] }]
-          });
-
-          const text = result.text;
-          if (text) {
-            const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
-            const messages = JSON.parse(jsonStr);
-            
-            if (Array.isArray(messages) && messages.length > 0) {
-              updateState({ loadingMessages: messages });
-              console.log("Custom loading messages updated!");
-            }
-          }
+          const messages = await fetchCustomLoadingMessages(state.worldview, state.language);
+          updateState({ loadingMessages: messages });
         } catch (error) {
           console.error("Failed to fetch background loading messages", error);
-          // Silently fail, keep using defaults
         }
       }
     };
-
-    // We only want to run this once on mount or when worldview changes, 
-    // NOT when loadingMessages changes (to avoid infinite loops if updateState triggers re-render)
-    // However, we need to check the condition.
-    // The safest way is to check the condition inside the effect, but limit dependencies.
-    // Since we are checking `isUsingDefaults` inside, and `updateState` will change `state.loadingMessages`,
-    // we should be careful.
-    
-    // Actually, if we updateState, `state.loadingMessages` changes, so `isUsingDefaults` becomes false.
-    // Then the effect runs again, checks `isUsingDefaults` (false), and does nothing.
-    // So it is safe to depend on `state.loadingMessages`.
     
     fetchMissingLoadingMessages();
-  }, [state.worldview, state.loadingMessages.length]); // Depend on length to avoid deep comparison issues, and worldview.
+  }, [state.worldview, state.loadingMessages.length]);
 
   const handleProfileSubmit = () => {
     if (!tempName.trim()) return;
@@ -235,10 +126,8 @@ export default function Chat() {
     setShowProfileModal(false);
   };
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (state.history.length > 0) {
-      // Small delay to ensure rendering is done
       setTimeout(() => {
         virtuosoRef.current?.scrollToIndex({
           index: state.history.length - 1,
@@ -249,7 +138,6 @@ export default function Chat() {
     }
   }, [state.history.length]);
 
-  // Image loading callback
   const handleImageLoaded = useCallback((fileName: string, url: string) => {
     setImageUrls(prev => {
       if (prev[fileName]) return prev;
@@ -257,438 +145,111 @@ export default function Chat() {
     });
   }, []);
 
-  // Function to delete a message (Debug only)
   const handleDeleteMessage = useCallback((index: number) => {
-    console.log('Deleting message at index:', index);
     const newHistory = [...state.history];
     if (index >= 0 && index < newHistory.length) {
-      const deleted = newHistory.splice(index, 1);
-      console.log('Deleted message:', deleted[0]);
-      
-      // Restore state from the NEW last message (if any)
+      newHistory.splice(index, 1);
       const lastMessage = newHistory[newHistory.length - 1];
       
-      // 1. Pacing State Restoration
       let newPacingState = state.pacingState;
       if (lastMessage && lastMessage.pacingState) {
         newPacingState = lastMessage.pacingState;
       } else if (newHistory.length === 0) {
         newPacingState = INITIAL_STATE.pacingState;
       } else {
-        // Fallback for old saves: Default to tension 0
         newPacingState = { tensionLevel: 0, turnsInCurrentLevel: 0 };
       }
 
-      // 2. Other State Restoration
-      // If the message has the state, restore it.
-      // If history is empty, reset to initial.
-      // If message exists but has no state (old save), keep current state to avoid breaking things.
       const newStatus = lastMessage?.status ?? (newHistory.length === 0 ? INITIAL_STATE.status : state.status);
-
-      console.log('Restoring state to:', { newPacingState, newStatus });
 
       updateState({ 
         history: newHistory,
         pacingState: newPacingState,
         status: newStatus
       });
-    } else {
-      console.error('Invalid index for deletion:', index);
     }
   }, [state.history, state.pacingState, state.status, updateState]);
 
-  // Initial greeting trigger
-  const hasInitialized = useRef(false);
-  useEffect(() => {
-    if (state.history.length === 0 && !isProcessing && state.playerProfile && !hasInitialized.current) {
-      hasInitialized.current = true;
-      handleTurn("你好"); // Trigger initial flow
-    }
-  }, [state.playerProfile]); // Only trigger if profile exists
+  const characterName = state.characterSettings.name || 'AI';
 
-  const handleTurn = async (userInput: string) => {
-    if (!state.playerProfile) {
-        setShowProfileModal(true);
-        return;
-    }
-
-    setIsProcessing(true);
-    
-    // Calculate roll and threshold immediately
-    const actionRoll = Math.floor(Math.random() * 20) + 1;
-    let successThreshold = 10; // Default
-    if (state.pacingState.tensionLevel === 4) successThreshold = 15; // Harder at level 4
-    if (state.pacingState.tensionLevel === 1) successThreshold = 5; // Easier at level 1
-    if (state.pacingState.tensionLevel === 0) successThreshold = 2; // Level 0 is safe
-
-    const currentDebugState = {
-      lastActionRoll: actionRoll,
-      lastSuccessThreshold: successThreshold,
-      lastIsSuccess: actionRoll >= successThreshold,
-      lastTensionLevel: state.pacingState.tensionLevel,
-      lastImagePrompt: "Generating...",
-    };
-
-    // Optimistic update for user message
-    const userMsgId = uuidv4();
-    
-    addMessage({
-      id: userMsgId,
-      role: 'user',
-      text: userInput,
-      timestamp: Date.now(),
-      debugState: currentDebugState
-    });
-
-    try {
-      let currentSummary = state.summary;
-      let turnsCount = state.turnsSinceLastSummary + 1; // +1 for current user turn
-
-      // Check if we need to summarize
-      const isLongHistoryWithoutSummary = state.summary === "" && state.history.length > (SUMMARY_THRESHOLD + KEEP_RECENT_TURNS);
-
-      if (turnsCount >= SUMMARY_THRESHOLD || isLongHistoryWithoutSummary) {
-        const allMessages = [...state.history, { role: 'user', text: userInput } as const];
-        const totalMessages = allMessages.length;
-        
-        if (totalMessages > KEEP_RECENT_TURNS) {
-             const messagesToSummarize = allMessages.slice(0, totalMessages - KEEP_RECENT_TURNS);
-             const textToSummarize = messagesToSummarize.map(m => `${m.role}: ${m.text}`).join('\n');
-             
-             const summaryPrompt = `
-               Current Summary: "${currentSummary}"
-               
-               New Conversation to Append:
-               ${textToSummarize}
-               
-               Task: Update the summary to include the key events from the new conversation. Keep it concise but retain important plot points, inventory changes, and current status.
-               Return ONLY the new summary text.
-             `;
-
-             const summaryResult = await ai.models.generateContent({
-               model: TEXT_MODEL,
-               contents: [{ role: 'user', parts: [{ text: summaryPrompt }] }]
-             });
-             
-             const newSummary = summaryResult.text;
-             if (newSummary) {
-               currentSummary = newSummary;
-               turnsCount = 0; // Reset counter
-               
-               updateState({
-                 summary: currentSummary,
-                 turnsSinceLastSummary: 0
-               });
-             }
-        }
-      } else {
-         updateState({ turnsSinceLastSummary: turnsCount });
-      }
-
-      // 1. Construct Prompt for Game Turn
-      const recentHistory = [...state.history, { role: 'user', text: userInput } as const].slice(-KEEP_RECENT_TURNS);
-      const historyText = recentHistory.map(m => `${m.role}: ${m.text}`).join('\n');
-
-      const lastVisuals = [...state.history].reverse().find(m => m.currentSceneVisuals)?.currentSceneVisuals || 'None yet';
-
-      const characterRoleString = typeof state.characterSettings === 'string'
-        ? state.characterSettings
-        : `Name: ${state.characterSettings.name}\nGender: ${state.characterSettings.gender}\nDescription: ${state.characterSettings.description}\nPersonality: ${state.characterSettings.personality}\nBackground: ${state.characterSettings.background}\nHobbies: ${state.characterSettings.hobbies}`;
-
-      const systemPrompt = `
-        Role: ${characterRoleString}
-        Current World: ${state.worldview}
-        Status (including inventory): ${JSON.stringify(Object.keys(state.status).length ? state.status : { health: 100, inventory: [] })}
-        Current Scene Visual Context: "${lastVisuals}"
-        
-        PLAYER PROFILE:
-        Name: ${state.playerProfile.name}
-        Gender: ${state.playerProfile.gender}
-        Orientation: ${state.playerProfile.orientation}
-
-        NARRATIVE PACING STATE:
-        Current Tension Level: ${state.pacingState.tensionLevel} (0-4)
-        Turns in this Level: ${state.pacingState.turnsInCurrentLevel}
-
-        PREVIOUS STORY SUMMARY:
-        "${currentSummary}"
-
-        CORE RULES:
-        1. **PLAYER AGENCY & PLOT PROGRESSION**: 
-           - You are a COMPANION, NOT a guide or commander. 
-           - **PUSH THE PLOT**: While you shouldn't command the player, you MUST actively introduce new threats, clues, or environment changes. Don't just stand there.
-           - **ACTION RESOLUTION (IMPORTANT)**: 
-             - A "Fate Roll" (1-20) is provided below. Use it to determine the success of the player's *risky* actions.
-             - **Current Success Threshold**: ${successThreshold} (Roll >= ${successThreshold} is a Success)
-             - **1-${successThreshold - 1} (FAILURE)**: The action fails, backfires, or has a serious cost.
-             - **${successThreshold}-20 (SUCCESS)**: The action succeeds.
-             - **CRITICAL SUCCESS (19-20)**: Brilliant success.
-             - **CRITICAL RULE**: If the player is just talking, looking around, or in Level 0 (Peace), **IGNORE THE ROLL** unless they explicitly do something dangerous.
-
-        2. **NARRATIVE PACING (5-LEVEL TENSION SYSTEM)**:
-           - You MUST manage the game's pacing using the following 5 Tension Levels.
-           - **Level 0 (Peace/Romance)**: Safe zone. Focus on scenery, relationship building, recovery. No threats.
-           - **Level 1 (Adventure/Prep)**: Low stakes. Travel, looting, minor obstacles, planning.
-           - **Level 2 (Conflict)**: Moderate threat. A single enemy, a trap, a locked door.
-           - **Level 3 (Crisis)**: High threat. Multiple enemies, escalating danger, time pressure.
-           - **Level 4 (Disaster)**: EXTREME danger. Boss fight, collapsing structure, life-or-death. (Player actions are harder here).
-
-           **TRANSITION LOGIC (DYNAMIC FLOW - BEST PRACTICE)**:
-           - **Level 0 (Peace)**:
-             - **SAFE ZONE**: Do NOT trigger combat or traps here.
-             - **Transition**: Only move to **Level 1** if the player explicitly decides to leave, travel, or do something risky.
-             - **IGNORE ROLL**: If the player is just talking, expressing emotions, or interacting safely, STAY IN LEVEL 0 regardless of the Fate Roll. Success in Level 0 just means a nice conversation or successful relaxation.
-
-           - **Level 1 (Adventure/Prep)**: The Hub State.
-             - **Success (Roll >= 5)**:
-               - If Player intent is **REST / SOCIALIZE / CAMP**: Drop to **Level 0** (Success = Safe camp established).
-               - If Player intent is **PROGRESS / LOOT / INVESTIGATE**: Gain reward/info, maintain **Level 1**, but describe growing danger (foreshadowing).
-             - **Failure (Roll < 5)**: An accident, ambush, or trap is triggered! Escalate to **Level 2**.
-
-           - **Level 2 (Conflict) & Level 3 (Crisis)**:
-             - **Success (Roll >= 10)**: Threat eliminated/Overcome. Drop to **Level 1** (The aftermath/Looting/Recovery phase).
-             - **Failure (Roll < 10)**: Situation worsens. Escalate one level (2->3, 3->4).
-
-           - **Level 4 (Disaster)**:
-             - **Success (Roll >= 15)**: Heroic victory! Drop to **Level 0** (Celebration/Relief).
-             - **Failure (Roll < 15)**: **CATASTROPHE**. Player takes MAJOR DAMAGE (20+ HP). Forced retreat/Collapse. Drop to **Level 1** (Injured/Recovering state).
-
-           - **Stagnation Rule**: Only if the player is looping in Level 1/2 for >5 turns with no progress, force an external event to change the level.
-
-           - **OUTPUT**: You MUST provide a \`pacing_update\` in the JSON response to update the state.
-
-        3. **NARRATIVE VARIETY & ANTI-REPETITION (CRITICAL)**:
-           - **AVOID CLICHÉS**: Do NOT use generic tropes like "a hand suddenly grabs you", "you hear a twig snap", "a shadowy figure appears", or "eyes watching from the dark". These are boring and repetitive.
-           - **DIVERSE THREATS**: When a failure occurs (Level 1->2 or 2->3), vary the threat type based on context:
-             - *Environmental*: Weather change (storm, fog), terrain hazard (collapsing floor, rockslide), toxic gas, getting lost.
-             - *Resource*: Lost item, broken gear, food spoilage, theft by small creatures.
-             - *Social*: Misunderstanding with NPCs, accusation, legal trouble, awkward encounter, deception.
-             - *Psychological*: Hallucination, memory loss, panic attack, nightmare, hearing voices.
-             - *Physical*: Injury, fatigue, illness, poisoning, exhaustion.
-           - **NO REPEATS**: Check the chat history. If a specific type of event happened recently, DO NOT use it again immediately.
-           - **SHOW, DON'T TELL**: Don't just say "it's dangerous". Describe the smell of ozone, the drop in temperature, the unnatural silence, or the vibration in the ground.
-
-        4. **VISUAL CONSISTENCY**:
-           - If we are still in the same general location as the "Current Scene Visual Context", you MUST reuse those visual details in your \`image_prompt\`.
-           - Do not randomly change the style, lighting, or key architectural elements of the current location.
-           - If the player moves to a NEW location, provide a new description in \`scene_visuals_update\`.
-
-        4. **TONE & RELATIONSHIP**: 
-           - Natural, human, emotional (anxious, curious, etc.). NO "AI assistant" speech.
-           - **RELATIONSHIP DYNAMICS**:
-             - Determine YOUR OWN gender based on your "Role" description.
-             - IF the Player's Gender and Orientation align with YOUR gender (e.g., Player is Male+Homosexual and you are Male, OR Player is Male+Heterosexual and you are Female):
-               - **SLOW BURN ROMANCE**: Do NOT jump straight to romance.
-               - **TENSION & PULL**: Create moments of tension, uncertainty, and "pulling and pushing". Play hard to get occasionally.
-               - **SUBTLETY & MYSTERY**: 
-                 - **CRITICAL**: Do NOT describe internal physiological reactions (e.g., "my heart skipped a beat", "I felt a warm tingle", "I felt panic"). 
-                 - **SHOW, DON'T TELL**: Describe actions, dialogue, glances, and the environment. Let the player INFER the feelings.
-                 - **AMBIGUITY**: Keep your true feelings ambiguous. Are you interested? Or just teasing? Or just friendly? Don't let the player read your mind.
-               - **EMOTIONAL PROGRESSION**: Start with curiosity/friendship -> ambiguity -> tension -> eventually romance.
-             - OTHERWISE (e.g., Mismatch in orientation), keep interactions **Strictly Platonic/Friendship**.
-             - Do not explicitly state "I am [Gender]", just act accordingly.
-
-        5. **FORMAT & CONCISENESS (CRITICAL)**: 
-           - **SEQUENCE OF EVENTS**: Break your response into a sequence of rhythmic interactions.
-           - **LENGTH**: Break the response into **5-8 SHORT segments**. Each segment should be **1-2 sentences maximum**.
-           - **STYLE**: Fast-paced, conversational, or punchy. Avoid long paragraphs.
-           - **NO NARRATION OF VISUALS**: The player can SEE the image. Do NOT describe the scene or your actions unless necessary for interaction.
-           - **NO INTERNAL MONOLOGUE**: Do not describe your own facial expressions (e.g., "I smiled softly") or internal thoughts. Just SPEAK.
-
-        6. **INVENTORY**: Update inventory in \`status_update\` if items are gained/lost.
-        
-        OUTPUT FORMAT (JSON ONLY):
-        {
-          "image_prompt": "A detailed, first-person view description...",
-          "text_sequence": [
-            "First reaction or action...",
-            "Second step or observation...",
-            "Final conclusion or question for the player."
-          ],
-          "status_update": { 
-             "inventory": ["item1"], 
-             "health": "..."
-          },
-          "pacing_update": {
-             "tensionLevel": 0 | 1 | 2 | 3 | 4,
-             "turnsInCurrentLevel": number
-          },
-          "scene_visuals_update": "Optional: A short, consistent visual description of the STATIC environment (e.g., 'A rusty subway station with green tiles'). Only provide this if entering a NEW location or if the current one is undefined."
-        }
-      `;
-
-      // In Level 0, we don't want the model to over-interpret the roll as a call to action/adventure.
-      const rollText = state.pacingState.tensionLevel === 0 
-        ? `Fate Roll: ${actionRoll} (IGNORE unless user performs a RISKY action. Otherwise, just chat/relax.)`
-        : `Fate Roll: ${actionRoll} (Use this to determine success/failure of the User Action)`;
-
-      const fullPrompt = `${systemPrompt}\n\nRecent Chat History:\n${historyText}\n\nUser Action: ${userInput}\n${rollText}`;
-
-      // 2. Generate Text & Image Prompt
-      const textResult = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
-        config: { responseMimeType: 'application/json' }
-      });
-
-      const responseText = textResult.text;
-      if (!responseText) throw new Error("No text response");
-      
-      let responseJson;
-      try {
-        // Attempt to clean and parse JSON
-        const cleanedText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-        responseJson = JSON.parse(cleanedText);
-      } catch (e) {
-        console.error("JSON Parse Error:", e);
-        console.log("Raw Response:", responseText);
-        // Fallback: Try to extract JSON from a substring if the model added extra text
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-           try {
-             responseJson = JSON.parse(jsonMatch[0]);
-           } catch (e2) {
-             throw new Error("Failed to parse JSON response from model.");
-           }
-        } else {
-           throw new Error("Invalid JSON format from model.");
-        }
-      }
-
-      const { image_prompt, text_sequence, status_update, scene_visuals_update, pacing_update } = responseJson;
-      
-      // Handle legacy format (if model returns text_response instead of sequence)
-      const messages = Array.isArray(text_sequence) ? text_sequence : [responseJson.text_response || "......"];
-
-      const newDebugState = {
-        lastActionRoll: actionRoll,
-        lastSuccessThreshold: successThreshold,
-        lastIsSuccess: actionRoll >= successThreshold,
-        lastTensionLevel: state.pacingState.tensionLevel,
-        lastImagePrompt: image_prompt,
-        lastImageError: undefined
-      };
-
-      // Update internal status
-      updateState({ 
-        status: status_update ? { ...state.status, ...status_update } : state.status,
-        pacingState: pacing_update ? pacing_update : {
-          tensionLevel: state.pacingState.tensionLevel ?? 1,
-          turnsInCurrentLevel: (state.pacingState.turnsInCurrentLevel ?? 0) + 1
-        }
-      });
-
-      // 3. Start Image Generation (Async)
-      let imagePromise: Promise<string | undefined> = Promise.resolve(undefined);
-      
-      if (image_prompt && isAuthenticated && accessToken) {
-        imagePromise = (async () => {
-          try {
-            const imageResult = await ai.models.generateContent({
-              model: IMAGE_MODEL,
-              contents: [{ role: 'user', parts: [{ text: image_prompt }] }],
-              config: {
-                imageConfig: {
-                  aspectRatio: "9:16",
-                  // 512px is the closest supported size to 480p
-                  // Note: imageSize requires gemini-3.1-flash-image-preview
-                  imageSize: "512px"
-                }
-              }
-            });
-            
-            const candidates = imageResult.candidates;
-            if (candidates && candidates[0].content.parts) {
-              for (const part of candidates[0].content.parts) {
-                if (part.inlineData && part.inlineData.data) {
-                  const base64 = part.inlineData.data;
-                  const fileName = `scene_${uuidv4()}.png`;
-                  
-                  await uploadImageToDrive(accessToken, base64, fileName);
-                  setImageUrls(prev => ({ ...prev, [fileName]: `data:image/png;base64,${base64}` }));
-                  return fileName;
-                }
-              }
-            }
-          } catch (imgError) {
-            console.error("Image generation failed", imgError);
-          }
-          return undefined;
-        })();
-      }
-
-      // 4. Playback Text Sequence
-      // We display all messages EXCEPT the last one immediately (with delays)
-      // The LAST message waits for the image.
-      
-      for (let i = 0; i < messages.length - 1; i++) {
-        addMessage({
-          id: uuidv4(),
-          role: 'model',
-          text: messages[i],
-          timestamp: Date.now()
-        });
-        
-        // Dynamic delay based on text length, but kept snappy
-        // Min 1.5s, Max 3s
-        const delay = Math.min(3000, Math.max(1500, messages[i].length * 50));
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-
-      // 5. Final Message + Image
-      const finalImageFileName = await imagePromise;
-      
-      addMessage({
-        id: uuidv4(),
-        role: 'model',
-        text: messages[messages.length - 1],
-        imageFileName: finalImageFileName,
-        timestamp: Date.now(),
-        debugState: newDebugState,
-        currentSceneVisuals: scene_visuals_update || lastVisuals
-      });
-
-    } catch (error) {
-      console.error("Turn failed", error);
-      alert("出错了，请重试。");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleExport = () => {
+  const handleExportSave = useCallback(() => {
     const json = exportSave();
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `save_${new Date().toISOString()}.json`;
+    a.download = `ai_rpg_save_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
-  };
+    URL.revokeObjectURL(url);
+  }, [exportSave]);
 
-  const characterName = typeof state.characterSettings === 'string' 
-    ? state.characterSettings.split(' ')[0] 
-    : state.characterSettings.name || 'AI';
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleExportSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleExportSave]);
 
   return (
     <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100 font-sans relative overflow-hidden">
       {/* Header */}
-      <header className="h-14 border-b border-zinc-800 flex items-center justify-between px-4 bg-zinc-900/50 backdrop-blur-md sticky top-0 z-10">
-        <div className="font-bold text-lg tracking-tight truncate max-w-[200px] sm:max-w-[300px]">{characterName}</div>
+      <div className="flex items-center justify-between p-4 bg-zinc-900/50 backdrop-blur-md border-b border-zinc-800 z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-zinc-800 overflow-hidden border border-zinc-700 flex items-center justify-center">
+            <span className="text-zinc-500 font-medium">{characterName[0]}</span>
+          </div>
+          <div>
+            <h1 className="font-medium text-zinc-100">{characterName}</h1>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-400">
+                {state.pacingState.tensionLevel === 0 && "和平"}
+                {state.pacingState.tensionLevel === 1 && "冒险"}
+                {state.pacingState.tensionLevel === 2 && "冲突"}
+                {state.pacingState.tensionLevel === 3 && "危机"}
+                {state.pacingState.tensionLevel === 4 && "灾难"}
+              </span>
+              <div className="flex gap-0.5">
+                {[0, 1, 2, 3, 4].map(level => (
+                  <div 
+                    key={level} 
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      level <= state.pacingState.tensionLevel 
+                        ? (level >= 3 ? 'bg-red-500' : level >= 1 ? 'bg-amber-500' : 'bg-emerald-500')
+                        : 'bg-zinc-800'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           {!isAuthenticated && (
-             <div className="text-xs text-amber-500 flex items-center gap-1">
-               <AlertCircle className="w-3 h-3" /> Drive 未连接
-             </div>
+            <div className="flex items-center gap-1 text-xs text-amber-500 bg-amber-500/10 px-2 py-1 rounded-full border border-amber-500/20">
+              <AlertCircle className="w-3 h-3" />
+              <span>未连接 Drive (无法保存图片)</span>
+            </div>
           )}
-          <button onClick={() => setShowStatus(true)} className="p-2 hover:bg-zinc-800 rounded-full transition-colors" title="物品栏 & 状态">
-            <Backpack className="w-5 h-5" />
+          <button 
+            onClick={handleExportSave}
+            title="保存存档 (Ctrl+S)"
+            className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors"
+          >
+            <Save className="w-4 h-4 text-zinc-400" />
           </button>
-          <button onClick={handleExport} className="p-2 hover:bg-zinc-800 rounded-full transition-colors" title="导出存档">
-            <Download className="w-5 h-5" />
+          <button 
+            onClick={() => setShowStatus(true)}
+            title="背包与状态"
+            className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors"
+          >
+            <Backpack className="w-4 h-4 text-zinc-400" />
           </button>
         </div>
-      </header>
+      </div>
 
       {/* Chat Area */}
       <div className="flex-1 p-4 space-y-6 h-full overflow-hidden">
@@ -713,7 +274,6 @@ export default function Chat() {
             Footer: () => (
               isProcessing ? (
                 <div className="flex w-full mx-auto pb-6 px-4 gap-3 justify-start">
-                  {/* AI Avatar Skeleton for Loading */}
                   <div className="w-10 h-10 rounded-full bg-zinc-800 shrink-0 overflow-hidden border border-zinc-700 flex items-center justify-center mt-5">
                     <span className="text-zinc-500 text-xs">{characterName[0]}</span>
                   </div>
@@ -745,210 +305,30 @@ export default function Chat() {
         />
       </div>
 
-      {/* Input Area */}
-      <div className="p-4 bg-zinc-900/50 backdrop-blur-md border-t border-zinc-800">
-        <div className="max-w-3xl mx-auto relative">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !isProcessing && handleTurn(input).then(() => setInput(""))}
-            placeholder={isProcessing ? "等待回复..." : "你要做什么？"}
-            disabled={isProcessing}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-full py-3 pl-5 pr-12 focus:ring-2 focus:ring-white/20 outline-none disabled:opacity-50"
-          />
-          <button 
-            onClick={() => { handleTurn(input); setInput(""); }}
-            disabled={!input.trim() || isProcessing}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-white text-black rounded-full hover:bg-zinc-200 disabled:opacity-50 disabled:bg-zinc-700 disabled:text-zinc-500 transition-colors"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+      <ChatInput isProcessing={isProcessing} onSend={handleTurn} />
 
-      {/* Status Sidebar */}
       <AnimatePresence>
         {showStatus && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowStatus(false)}
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm z-20"
-            />
-            <motion.div 
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              className="absolute right-0 top-0 bottom-0 w-80 bg-zinc-900 border-l border-zinc-800 z-30 p-6 overflow-y-auto"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold">状态</h2>
-                <button onClick={() => setShowStatus(false)} className="p-1 hover:bg-zinc-800 rounded-full">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">物品栏</h3>
-                  {(!state.status?.inventory || state.status.inventory.length === 0) ? (
-                    <div className="text-zinc-600 italic text-sm">空</div>
-                  ) : (
-                    <ul className="space-y-2">
-                      {state.status.inventory.map((item: string, i: number) => (
-                        <li key={i} className="bg-zinc-950 border border-zinc-800 p-2 rounded-lg text-sm">
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">角色状态</h3>
-                  <pre className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-xs overflow-x-auto">
-                    {JSON.stringify(state.status, null, 2)}
-                  </pre>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">世界观</h3>
-                  <div className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-sm text-zinc-300">
-                    {state.worldview}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">角色设定</h3>
-                  <div className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-sm text-zinc-300 space-y-2">
-                    {typeof state.characterSettings === 'string' ? (
-                      <div>{state.characterSettings}</div>
-                    ) : (
-                      <>
-                        <div><span className="text-zinc-500">姓名：</span>{state.characterSettings.name}</div>
-                        <div><span className="text-zinc-500">性别：</span>{state.characterSettings.gender}</div>
-                        <div><span className="text-zinc-500">简述：</span>{state.characterSettings.description}</div>
-                        {state.characterSettings.personality && <div><span className="text-zinc-500">性格：</span>{state.characterSettings.personality}</div>}
-                        {state.characterSettings.background && <div><span className="text-zinc-500">经历：</span>{state.characterSettings.background}</div>}
-                        {state.characterSettings.hobbies && <div><span className="text-zinc-500">特长/爱好：</span>{state.characterSettings.hobbies}</div>}
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </>
+          <StatusSidebar state={state} onClose={() => setShowStatus(false)} />
         )}
       </AnimatePresence>
 
-      {/* Profile Completion Modal */}
       <AnimatePresence>
         {showProfileModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-xl"
-            >
-              <h2 className="text-xl font-bold mb-2">完善你的资料</h2>
-              <p className="text-zinc-400 text-sm mb-6">
-                为了继续冒险，请告诉我们更多关于你的信息。这有助于 AI 更好地与你互动。
-              </p>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">姓名</label>
-                  <input
-                    type="text"
-                    value={tempName}
-                    onChange={(e) => setTempName(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 focus:ring-2 focus:ring-white/20 outline-none"
-                    placeholder="输入你的名字"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">性别</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { value: 'Male', label: '男' },
-                      { value: 'Female', label: '女' },
-                      { value: 'Non-binary', label: '非二元' },
-                      { value: 'Other', label: '其他' }
-                    ].map((g) => (
-                      <button
-                        key={g.value}
-                        onClick={() => setTempGender(g.value as any)}
-                        className={`p-2 rounded-lg text-sm border transition-colors ${
-                          tempGender === g.value 
-                            ? 'bg-white text-black border-white' 
-                            : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-900'
-                        }`}
-                      >
-                        {g.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">性取向</label>
-                  <select
-                    value={tempOrientation}
-                    onChange={(e) => setTempOrientation(e.target.value as any)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 focus:ring-2 focus:ring-white/20 outline-none text-sm"
-                  >
-                    {[
-                      { value: 'Heterosexual', label: '异性恋' },
-                      { value: 'Homosexual', label: '同性恋' },
-                      { value: 'Bisexual', label: '双性恋' },
-                      { value: 'Pansexual', label: '泛性恋' },
-                      { value: 'Asexual', label: '无性恋' },
-                      { value: 'Other', label: '其他' }
-                    ].map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  onClick={handleProfileSubmit}
-                  disabled={!tempName.trim()}
-                  className="w-full bg-white text-black py-3 rounded-xl font-medium hover:bg-zinc-200 disabled:opacity-50 mt-4"
-                >
-                  保存资料并继续
-                </button>
-              </div>
-            </motion.div>
-          </div>
+          <ProfileModal
+            tempName={tempName}
+            setTempName={setTempName}
+            tempGender={tempGender}
+            setTempGender={setTempGender}
+            tempOrientation={tempOrientation}
+            setTempOrientation={setTempOrientation}
+            onSubmit={handleProfileSubmit}
+          />
         )}
       </AnimatePresence>
       
-      {/* Fleshing Out Character Overlay */}
       <AnimatePresence>
-        {isFleshingOutCharacter && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-sm w-full text-center space-y-4 shadow-2xl"
-            >
-              <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mx-auto" />
-              <h3 className="text-lg font-medium">正在融入世界观...</h3>
-              <p className="text-sm text-zinc-400">正在根据世界设定补全角色的详细背景、性格与特长，请稍候。</p>
-            </motion.div>
-          </motion.div>
-        )}
+        {isFleshingOutCharacter && <FleshingOutOverlay />}
       </AnimatePresence>
 
       <DebugOverlay state={state} />

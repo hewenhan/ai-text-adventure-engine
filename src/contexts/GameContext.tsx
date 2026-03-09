@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 interface GameContextType {
   state: GameState;
-  updateState: (updates: Partial<GameState>) => void;
+  updateState: (updates: Partial<GameState> | ((prev: GameState) => Partial<GameState>)) => void;
   loadSave: (json: string) => boolean;
   exportSave: () => string;
   resetGame: () => void;
@@ -23,8 +23,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('ai_rpg_save', JSON.stringify(state));
   }, [state]);
 
-  const updateState = (updates: Partial<GameState>) => {
-    setState(prev => ({ ...prev, ...updates }));
+  const updateState = (updates: Partial<GameState> | ((prev: GameState) => Partial<GameState>)) => {
+    setState(prev => {
+      const newUpdates = typeof updates === 'function' ? updates(prev) : updates;
+      return { ...prev, ...newUpdates };
+    });
   };
 
   const loadSave = (json: string): boolean => {
@@ -42,6 +45,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         turnsSinceLastSummary: parsed.turnsSinceLastSummary ?? INITIAL_STATE.turnsSinceLastSummary,
         playerProfile: parsed.playerProfile,
         loadingMessages: parsed.loadingMessages || DEFAULT_LOADING_MESSAGES,
+        language: parsed.language || INITIAL_STATE.language,
         
         // Consolidate inventory into status
         status: {
