@@ -39,25 +39,25 @@
 ## 🚀 如何开始
 
 1. **克隆项目**
-   \`\`\`bash
+   ```bash
    git clone https://github.com/hewenhan/ai-text-adventure-engine.git
    cd ai-text-adventure-engine
-   \`\`\`
+   ```
 
 2. **安装依赖**
-   \`\`\`bash
+   ```bash
    npm install
-   \`\`\`
+   ```
 
 3. **配置环境变量**
    复制 \`.env.example\` 为 \`.env\`，并填入你的 API Key：
-   \`\`\`env
+   ```env
    GEMINI_API_KEY=your_api_key_here
-   \`\`\`
+   ```
 
 4. **启动开发服务器**
-   \`\`\`bash
+   ```bash
    npm run dev
-   \`\`\`
+   ```
    
 打开浏览器访问 \`http://localhost:3000\` 即可开始你的冒险！
