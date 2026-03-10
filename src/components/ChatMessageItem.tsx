@@ -11,12 +11,13 @@ import { IMAGE_PROHIBITED_SENTINEL } from '../services/aiService';
 interface ChatMessageItemProps {
   msg: ChatMessage;
   characterName: string;
+  portraitUrl?: string | null;
   imageUrl?: string;
   onImageLoaded: (fileName: string, url: string) => void;
   onDelete?: () => void;
 }
 
-export const ChatMessageItem = React.memo(({ msg, characterName, imageUrl, onImageLoaded, onDelete }: ChatMessageItemProps) => {
+export const ChatMessageItem = React.memo(({ msg, characterName, portraitUrl, imageUrl, onImageLoaded, onDelete }: ChatMessageItemProps) => {
   const { accessToken } = useAuth();
   const [isLoadingImage, setIsLoadingImage] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -53,10 +54,14 @@ export const ChatMessageItem = React.memo(({ msg, characterName, imageUrl, onIma
         msg.role === 'user' ? "justify-end" : "justify-start"
       )}
     >
-      {/* AI Avatar Skeleton */}
+      {/* AI Avatar */}
       {msg.role !== 'user' && (
-        <div className="w-10 h-10 rounded-full bg-zinc-800 shrink-0 overflow-hidden border border-zinc-700 flex items-center justify-center mt-5">
-          <span className="text-zinc-500 text-xs">{characterName[0]}</span>
+        <div className="w-20 h-20 rounded-xl bg-zinc-800 shrink-0 overflow-hidden border border-zinc-700 flex items-center justify-center mt-5">
+          {portraitUrl ? (
+            <img src={portraitUrl} alt={characterName} className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-zinc-500 text-xs">{characterName[0]}</span>
+          )}
         </div>
       )}
 

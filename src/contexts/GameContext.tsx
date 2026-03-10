@@ -18,7 +18,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem('ai_rpg_save');
     if (!saved) return INITIAL_STATE;
     const parsed = JSON.parse(saved);
-    return { ...INITIAL_STATE, ...parsed, currentObjective: parsed.currentObjective ?? null, transitState: parsed.transitState ?? null };
+    return { ...INITIAL_STATE, ...parsed, currentObjective: parsed.currentObjective ?? null, transitState: parsed.transitState ?? null, mapImageFileName: parsed.mapImageFileName ?? parsed.mapImageUrl ?? null, hpDescription: parsed.hpDescription ?? '', characterPortraitFileName: parsed.characterPortraitFileName ?? null };
   });
 
   useEffect(() => {
@@ -40,7 +40,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       
       // Migration for old saves: Ensure new fields exist
       const migratedState: GameState = {
-        characterSettings: parsed.characterSettings ?? INITIAL_STATE.characterSettings,
+        characterSettings: { ...INITIAL_STATE.characterSettings, ...(parsed.characterSettings ?? {}) },
         worldview: parsed.worldview ?? INITIAL_STATE.worldview,
         isFirstRun: parsed.isFirstRun ?? INITIAL_STATE.isFirstRun,
         summary: parsed.summary ?? INITIAL_STATE.summary,
@@ -51,6 +51,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         
         // New survival fields (with migration from old saves)
         hp: typeof parsed.hp === 'number' ? parsed.hp : (parsed.status?.health ?? 100),
+        hpDescription: parsed.hpDescription ?? '',
         lives: typeof parsed.lives === 'number' ? parsed.lives : 3,
         isGameOver: parsed.isGameOver ?? false,
         inventory: Array.isArray(parsed.inventory) ? parsed.inventory : (parsed.status?.inventory || []),
@@ -58,9 +59,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
         // Spatial fields
         worldData: parsed.worldData ?? null,
-        mapImageUrl: parsed.mapImageUrl ?? null,
+        mapImageFileName: parsed.mapImageFileName ?? parsed.mapImageUrl ?? null,
         currentWorldId: parsed.currentWorldId ?? null,
         currentNodeId: parsed.currentNodeId ?? null,
+        characterPortraitFileName: parsed.characterPortraitFileName ?? null,
         currentHouseId: parsed.currentHouseId ?? null,
         transitState: parsed.transitState ?? null,
 
@@ -79,6 +81,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
         // Objective tracking
         currentObjective: parsed.currentObjective ?? null,
+
+        // Art style
+        artStylePrompt: parsed.artStylePrompt ?? '',
         
         // Migration for history: Ensure all messages have IDs
         history: Array.isArray(parsed.history) 

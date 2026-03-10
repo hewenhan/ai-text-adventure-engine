@@ -150,6 +150,15 @@ export function useChatLogic() {
         ? visibleHousesList.map(h => `${h.id} (${h.name} - ${h.type})`).join(', ')
         : 'None';
 
+      // 提取最近两轮对话上下文用于意图判定
+      const recentTurns: string[] = [];
+      let turnCount = 0;
+      for (let i = state.history.length - 1; i >= 0 && turnCount < 2; i--) {
+        recentTurns.unshift(`${state.history[i].role}: ${state.history[i].text}`);
+        if (state.history[i].role === 'user') turnCount++;
+      }
+      const recentConversation = recentTurns.join('\n');
+
       const intent = await extractIntent(
         userInput,
         state.currentNodeId!,
@@ -158,6 +167,7 @@ export function useChatLogic() {
         connectedNodesInfo,
         visibleHousesInfo,
         state.currentObjective?.description || null,
+        recentConversation,
         state.language
       );
 
@@ -321,7 +331,8 @@ OUTPUT FORMAT (JSON ONLY):
 {
   "image_prompt": "A detailed, first-person view description for image generation...",
   "text_sequence": ["segment1", "segment2", ...],
-  "scene_visuals_update": "仅在进入新地点时提供，否则省略"
+  "scene_visuals_update": "仅在进入新地点时提供，否则省略",
+  "hp_description": "根据当前HP(${resolution.newHp}/100)用一句简短的话描述角色当前的身体健康状况（如：'精神饱满，毫发无伤'、'左臂渗血，脸色苍白'等）"
 }
 
 不需要返回任何状态数值 update（全部数据状态已在系统后台静默变更完毕）。`;
@@ -333,8 +344,13 @@ OUTPUT FORMAT (JSON ONLY):
       // ── Call LLM for story rendering ──
       const responseJson = await generateTurn(fullPrompt);
       // console.log("AI Response JSON:", responseJson);
-      const { image_prompt, text_sequence, scene_visuals_update } = responseJson;
+      const { image_prompt, text_sequence, scene_visuals_update, hp_description } = responseJson;
       
+      // 存储 AI 生成的健康状况描述
+      if (hp_description) {
+        updateState({ hpDescription: hp_description });
+      }
+
       const messages = Array.isArray(text_sequence) ? text_sequence : [responseJson.text_response || "......"];
 
       const newDebugState = {
@@ -372,9 +388,15 @@ OUTPUT FORMAT (JSON ONLY):
       let imagePromise: Promise<string | undefined> = Promise.resolve(undefined);
       
       if (image_prompt && isAuthenticated && accessToken) {
+        // 如果角色有外貌提词，注入到图片生成 prompt 中
+        const characterAppearance = state.characterSettings.appearancePrompt;
+        const enrichedImagePrompt = characterAppearance
+          ? `${image_prompt}\n\nIMPORTANT - The companion character in this scene has the following fixed appearance: ${characterAppearance}`
+          : image_prompt;
+
         imagePromise = (async () => {
           try {
-            const base64Data = await generateImage(image_prompt);
+            const base64Data = await generateImage(enrichedImagePrompt, state.artStylePrompt || undefined);
             if (base64Data === IMAGE_PROHIBITED_SENTINEL) {
               newDebugState.lastImageError = 'PROHIBITED_CONTENT';
               return IMAGE_PROHIBITED_SENTINEL;

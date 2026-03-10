@@ -1,6 +1,9 @@
 import { motion } from 'motion/react';
 import { X, Heart, Shield, MapPin, Target } from 'lucide-react';
 import { GameState } from '../types/game';
+import { useAuth } from '../contexts/AuthContext';
+import { getImageUrlByName } from '../lib/drive';
+import { useEffect, useState } from 'react';
 
 interface StatusSidebarProps {
   state: GameState;
@@ -10,6 +13,17 @@ interface StatusSidebarProps {
 export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
   const currentNode = state.worldData?.nodes.find(n => n.id === state.currentNodeId);
   const currentHouse = currentNode?.houses.find(h => h.id === state.currentHouseId);
+  const { accessToken } = useAuth();
+  const [portraitUrl, setPortraitUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!state.characterPortraitFileName || !accessToken) return;
+    let cancelled = false;
+    getImageUrlByName(accessToken, state.characterPortraitFileName).then(url => {
+      if (!cancelled && url) setPortraitUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [state.characterPortraitFileName, accessToken]);
 
   return (
     <>
@@ -54,6 +68,9 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
                   style={{ width: `${state.hp}%` }}
                 />
               </div>
+              {state.hpDescription && (
+                <div className="text-xs text-zinc-400 italic">{state.hpDescription}</div>
+              )}
               <div className="flex items-center justify-between text-sm">
                 <span>复活币</span>
                 <div className="flex gap-1">
@@ -175,6 +192,11 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
           <div>
             <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">角色设定</h3>
             <div className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-sm text-zinc-300 space-y-2">
+              {portraitUrl && (
+                <div className="flex justify-center mb-3">
+                  <img src={portraitUrl} alt="角色头像" className="w-24 h-24 rounded-full object-cover border-2 border-zinc-700" />
+                </div>
+              )}
               <div><span className="text-zinc-500">姓名：</span>{state.characterSettings.name}</div>
               <div><span className="text-zinc-500">性别：</span>{state.characterSettings.gender}</div>
               <div><span className="text-zinc-500">简述：</span>{state.characterSettings.description}</div>

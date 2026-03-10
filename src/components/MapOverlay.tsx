@@ -1,7 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, MapPin, Lock, Eye, ArrowRight } from 'lucide-react';
 import { GameState } from '../types/game';
+import { useAuth } from '../contexts/AuthContext';
+import { getImageUrlByName } from '../lib/drive';
 
 interface MapOverlayProps {
   state: GameState;
@@ -39,11 +41,28 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
   const worldData = state.worldData;
   if (!worldData) return null;
 
+  const { accessToken } = useAuth();
   const currentNodeId = state.currentNodeId;
   const currentHouseId = state.currentHouseId;
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const fullscreenRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+  const [mapImageUrl, setMapImageUrl] = useState<string | null>(null);
+
+  // Load map image: either from Drive (filename) or direct data URL
+  useEffect(() => {
+    if (!state.mapImageFileName) return;
+    if (state.mapImageFileName.startsWith('data:')) {
+      setMapImageUrl(state.mapImageFileName);
+      return;
+    }
+    if (!accessToken) return;
+    let cancelled = false;
+    getImageUrlByName(accessToken, state.mapImageFileName).then(url => {
+      if (!cancelled && url) setMapImageUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [state.mapImageFileName, accessToken]);
 
   return (
     <>
@@ -100,10 +119,10 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
 
           {/* Left: Map Image — fixed on desktop, scrolls on mobile */}
           <div className="w-full lg:flex-[3_1_0%] lg:min-w-0 lg:h-full lg:flex lg:flex-col">
-            {state.mapImageUrl ? (
+            {mapImageUrl ? (
               <div className="rounded-xl overflow-hidden border border-zinc-800 lg:flex-1 lg:min-h-0 flex items-center justify-center bg-zinc-950">
                 <img
-                  src={state.mapImageUrl}
+                  src={mapImageUrl}
                   alt="World Map"
                   className="w-full h-auto max-h-80 lg:max-h-full lg:h-full object-contain cursor-pointer hover:opacity-90 transition-opacity"
                   onClick={() => setIsMapFullscreen(true)}
@@ -255,7 +274,7 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
 
       {/* Fullscreen Map Image Overlay */}
       <AnimatePresence>
-        {isMapFullscreen && state.mapImageUrl && (
+        {isMapFullscreen && mapImageUrl && (
           <motion.div
             ref={fullscreenRef}
             initial={{ opacity: 0 }}
@@ -267,7 +286,7 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
             }}
           >
             <motion.img
-              src={state.mapImageUrl}
+              src={mapImageUrl}
               alt="Fullscreen Map"
               drag
               dragConstraints={fullscreenRef}

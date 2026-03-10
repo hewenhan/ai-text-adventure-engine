@@ -15,17 +15,19 @@ import { StatusSidebar } from '../components/StatusSidebar';
 import { MapOverlay } from '../components/MapOverlay';
 import { FleshingOutOverlay } from '../components/FleshingOutOverlay';
 import { DriveToast } from '../components/DriveToast';
-import { fleshOutCharacterProfile, fetchCustomLoadingMessages, generateWorldData, generateMapImage } from '../services/aiService';
+import { uploadImageToDrive, getImageUrlByName } from '../lib/drive';
+import { fleshOutCharacterProfile, fetchCustomLoadingMessages, generateWorldData, generateMapImage, generateCharacterPortrait } from '../services/aiService';
 
 export default function Chat() {
   const { state, updateState, exportSave } = useGame();
-  const { isAuthenticated, driveError, reconnectDrive } = useAuth();
+  const { isAuthenticated, driveError, reconnectDrive, accessToken } = useAuth();
   const [showStatus, setShowStatus] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [driveToastDismissed, setDriveToastDismissed] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [portraitUrl, setPortraitUrl] = useState<string | null>(null);
   
   const { isProcessing, handleTurn } = useChatLogic();
 
@@ -37,6 +39,16 @@ export default function Chat() {
     return undefined;
   }, [state.history]);
   const { volume, changeVolume } = useBGM(currentBgmKey);
+
+  // Load character portrait from Drive
+  useEffect(() => {
+    if (!state.characterPortraitFileName || !accessToken) return;
+    let cancelled = false;
+    getImageUrlByName(accessToken, state.characterPortraitFileName).then(url => {
+      if (!cancelled && url) setPortraitUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [state.characterPortraitFileName, accessToken]);
 
   // Loading Message State
   const [currentLoadingMessage, setCurrentLoadingMessage] = useState(DEFAULT_LOADING_MESSAGES[0]);
@@ -94,6 +106,21 @@ export default function Chat() {
               isFleshedOut: true
             }
           });
+
+          // 生成角色证件照并上传到 Drive
+          if (profile.appearancePrompt && isAuthenticated && accessToken) {
+            generateCharacterPortrait(profile.appearancePrompt, state.worldview, state.artStylePrompt).then(async base64 => {
+              if (base64 && accessToken) {
+                try {
+                  const fileName = `ai_rpg_portrait_${Date.now()}.png`;
+                  await uploadImageToDrive(accessToken, base64, fileName);
+                  updateState({ characterPortraitFileName: fileName });
+                } catch (e) {
+                  console.error("Portrait upload to Drive failed", e);
+                }
+              }
+            }).catch(e => console.error("Portrait generation failed", e));
+          }
         } catch (error) {
           console.error("Failed to flesh out character", error);
           updateState({
@@ -118,7 +145,7 @@ export default function Chat() {
       if (!state.worldData && state.worldview && !isGeneratingWorld) {
         setIsGeneratingWorld(true);
         try {
-          const worldData = await generateWorldData(state.worldview, state.language);
+          const { worldData, artStylePrompt } = await generateWorldData(state.worldview, state.language);
           // Spawn Rule: player starts in first node's first house, force it safe
           const spawnNode = worldData.nodes[0];
           const spawnHouse = spawnNode?.houses[0];
@@ -127,17 +154,30 @@ export default function Chat() {
           }
           updateState({
             worldData,
+            artStylePrompt,
             currentWorldId: worldData.id,
             currentNodeId: spawnNode?.id || null,
             currentHouseId: spawnHouse?.id || null,
             pacingState: { tensionLevel: 0, turnsInCurrentLevel: 0 }
           });
 
-          // Generate map image in background (non-blocking)
-          generateMapImage(worldData, state.worldview).then(base64 => {
+          // Generate map image in background (non-blocking), upload to Drive
+          generateMapImage(worldData, state.worldview, artStylePrompt).then(async base64 => {
             if (base64) {
-              const mapUrl = `data:image/png;base64,${base64}`;
-              updateState({ mapImageUrl: mapUrl });
+              if (isAuthenticated && accessToken) {
+                try {
+                  const fileName = `ai_rpg_map_${Date.now()}.png`;
+                  await uploadImageToDrive(accessToken, base64, fileName);
+                  updateState({ mapImageFileName: fileName });
+                } catch (e) {
+                  console.error("Map image upload to Drive failed", e);
+                  // Fallback: store as data URL
+                  updateState({ mapImageFileName: `data:image/png;base64,${base64}` });
+                }
+              } else {
+                // No Drive auth, fallback to data URL
+                updateState({ mapImageFileName: `data:image/png;base64,${base64}` });
+              }
             }
           }).catch(e => console.error("Map image generation failed", e));
         } catch (error) {
@@ -267,8 +307,12 @@ export default function Chat() {
       {/* Header */}
       <div className="flex items-center justify-between p-4 bg-zinc-900/50 backdrop-blur-md border-b border-zinc-800 z-10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-zinc-800 overflow-hidden border border-zinc-700 flex items-center justify-center">
-            <span className="text-zinc-500 font-medium">{characterName[0]}</span>
+          <div className="w-10 h-10 rounded-lg bg-zinc-800 overflow-hidden border border-zinc-700 flex items-center justify-center">
+            {portraitUrl ? (
+              <img src={portraitUrl} alt={characterName} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-zinc-500 font-medium">{characterName[0]}</span>
+            )}
           </div>
           <div>
             <h1 className="font-medium text-zinc-100">{characterName}</h1>
@@ -350,12 +394,13 @@ export default function Chat() {
           data={state.history}
           initialTopMostItemIndex={state.history.length - 1}
           followOutput="smooth"
-          context={{ onDelete: handleDeleteMessage, imageUrls, characterName, onImageLoaded: handleImageLoaded }}
+          context={{ onDelete: handleDeleteMessage, imageUrls, characterName, onImageLoaded: handleImageLoaded, portraitUrl }}
           itemContent={(index, msg, context) => (
             <div className="pb-6">
               <ChatMessageItem 
                 msg={msg} 
                 characterName={context.characterName}
+                portraitUrl={context.portraitUrl}
                 imageUrl={msg.imageFileName ? context.imageUrls[msg.imageFileName] : undefined}
                 onImageLoaded={context.onImageLoaded}
                 onDelete={() => context.onDelete(index)}
@@ -366,8 +411,12 @@ export default function Chat() {
             Footer: () => (
               isProcessing ? (
                 <div className="flex w-full mx-auto pb-6 px-4 gap-3 justify-start">
-                  <div className="w-10 h-10 rounded-full bg-zinc-800 shrink-0 overflow-hidden border border-zinc-700 flex items-center justify-center mt-5">
-                    <span className="text-zinc-500 text-xs">{characterName[0]}</span>
+                  <div className="w-20 h-20 rounded-xl bg-zinc-800 shrink-0 overflow-hidden border border-zinc-700 flex items-center justify-center mt-5">
+                    {portraitUrl ? (
+                      <img src={portraitUrl} alt={characterName} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-zinc-500 text-xs">{characterName[0]}</span>
+                    )}
                   </div>
                   
                   <div className="flex flex-col max-w-[75%] items-start">

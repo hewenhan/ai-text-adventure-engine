@@ -52,6 +52,7 @@ export interface CharacterProfile {
   personality: string;
   background: string;
   hobbies: string;
+  appearancePrompt: string;
   isFleshedOut: boolean;
 }
 
@@ -76,6 +77,7 @@ export interface GameState {
 
   // 2. Core survival & economy values (TS-controlled)
   hp: number;             // (0-100)
+  hpDescription: string;  // AI-generated health status text
   lives: number;          // Revival tokens, 0 = permanent death
   isGameOver: boolean;
   inventory: string[];    // Explicit backpack
@@ -83,9 +85,10 @@ export interface GameState {
 
   // 3. Global map & spatial pointers
   worldData: WorldData | null;
-  mapImageUrl: string | null;
+  mapImageFileName: string | null;
   currentWorldId: string | null;
   currentNodeId: string | null;
+  characterPortraitFileName: string | null;
   currentHouseId: string | null; // null = outdoors in Node
 
   // 新增：旅途状态。null 表示在具体地点内；非 null 表示正在赶路。
@@ -110,6 +113,9 @@ export interface GameState {
     targetHouseId: string;
     description: string;
   } | null;
+
+  // 7. 世界观画风提词（用于统一所有生图风格）
+  artStylePrompt: string;
 }
 
 export interface ChatMessage {
@@ -124,6 +130,7 @@ export interface ChatMessage {
     turnsInCurrentLevel: number;
   };
   hp?: number;
+  hpDescription?: string;
   inventory?: string[];
   status?: Record<string, any>;
   currentSceneVisuals?: string;
@@ -140,6 +147,7 @@ export const DEFAULT_CHARACTER: CharacterProfile = {
   personality: "",
   background: "",
   hobbies: "",
+  appearancePrompt: "",
   isFleshedOut: false
 };
 export const SUMMARY_THRESHOLD = 20;
@@ -199,6 +207,7 @@ export const INITIAL_STATE: GameState = {
 
   // Core survival
   hp: 100,
+  hpDescription: '',
   lives: 3,
   isGameOver: false,
   inventory: [],
@@ -206,9 +215,10 @@ export const INITIAL_STATE: GameState = {
 
   // Spatial pointers
   worldData: null,
-  mapImageUrl: null,
+  mapImageFileName: null,
   currentWorldId: null,
   currentNodeId: null,
+  characterPortraitFileName: null,
   currentHouseId: null,
   transitState: null,
 
@@ -222,5 +232,8 @@ export const INITIAL_STATE: GameState = {
   },
 
   // Objective
-  currentObjective: null
+  currentObjective: null,
+
+  // Art style
+  artStylePrompt: ''
 };

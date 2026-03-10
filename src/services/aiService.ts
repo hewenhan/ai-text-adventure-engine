@@ -94,11 +94,14 @@ export async function generateTurn(fullPrompt: string): Promise<any> {
 
 export const IMAGE_PROHIBITED_SENTINEL = '__PROHIBITED_CONTENT__';
 
-export async function generateImage(imagePrompt: string): Promise<string | undefined> {
+export async function generateImage(imagePrompt: string, artStylePrompt?: string): Promise<string | undefined> {
+  const finalPrompt = artStylePrompt
+    ? `${imagePrompt}\n\nMANDATORY ART STYLE (apply this style to the entire image):\n${artStylePrompt}`
+    : imagePrompt;
   try {
     const imageResult = await ai.models.generateContent({
       model: IMAGE_MODEL,
-      contents: [{ role: 'user', parts: [{ text: imagePrompt }] }],
+      contents: [{ role: 'user', parts: [{ text: finalPrompt }] }],
       config: {
         imageConfig: {
           aspectRatio: "9:16",
@@ -161,6 +164,7 @@ export async function fleshOutCharacterProfile(worldview: string, baseName: stri
     4. Personality (their traits, quirks, how they act)
     5. Background (their past experiences, how they got here)
     6. Hobbies/Skills (what they are good at, what they like to do)
+    7. Appearance Prompt (a DETAILED, STABLE visual description of the character's physical appearance and outfit for image generation. Include: hair color/style, eye color, skin tone, facial features, body type, specific clothing items with colors and materials, accessories. This will be used as a fixed prompt for ALL future image generation involving this character. Be extremely specific and consistent.)
     
     Return ONLY a JSON object with this structure:
     {
@@ -169,7 +173,8 @@ export async function fleshOutCharacterProfile(worldview: string, baseName: stri
       "description": "string",
       "personality": "string",
       "background": "string",
-      "hobbies": "string"
+      "hobbies": "string",
+      "appearancePrompt": "string"
     }
     
     ${langInstruction}
@@ -230,6 +235,7 @@ export async function extractIntent(
   connectedNodesInfo: string,
   visibleHousesInfo: string,
   currentObjectiveDesc: string | null,
+  recentConversation: string,
   language: 'zh' | 'en' = 'zh'
 ): Promise<IntentResult> {
   const prompt = `You are an intent classifier for a text adventure game. Classify the player's action into ONE intent category.
@@ -238,7 +244,10 @@ Current Location: Node "${currentNodeId}", House "${currentHouseId || 'outdoors'
 Visible Environment: ${visibleContext}
 Connected Nodes: ${connectedNodesInfo}
 Visible Houses: ${visibleHousesInfo}
-Current Objective: ${currentObjectiveDesc || '无 (None - 玩家当前漫无目的，若提议去未知远处，请务必判定为 seek_quest)'}
+Current Objective: ${currentObjectiveDesc || '\u65e0 (None - \u73a9\u5bb6\u5f53\u524d\u6f2b\u65e0\u76ee\u7684\uff0c\u82e5\u63d0\u8bae\u53bb\u672a\u77e5\u8fdc\u5904\uff0c\u8bf7\u52a1\u5fc5\u5224\u5b9a\u4e3a seek_quest)'}
+
+Recent Conversation Context (for understanding intent continuity):
+${recentConversation || 'No prior conversation.'}
 
 Intent Categories:
 - "seek_quest": [HIGHEST PRIORITY] The player suggests, demands, or mentions traveling to a MACRO-DESTINATION (e.g., Internet Cafe, School, Hospital) that is ABSENT from the "Connected Nodes" and "Visible Houses" lists. EVEN IF the sentence is wrapped in a joke, a bet, or complaining about being sleepy/bored, IF it contains a request to go to a NEW UNLISTED place, you MUST choose seek_quest.
@@ -299,7 +308,7 @@ No markdown formatting.`;
  * Phase 0: Generate complete world topology data (10 nodes with houses).
  * Called once during game initialization.
  */
-export async function generateWorldData(worldview: string, language: 'zh' | 'en' = 'zh'): Promise<WorldData> {
+export async function generateWorldData(worldview: string, language: 'zh' | 'en' = 'zh'): Promise<{ worldData: WorldData; artStylePrompt: string }> {
   const langInstruction = language === 'zh' ? 'All names and descriptions MUST be in Chinese.' : 'All names and descriptions MUST be in English.';
   const prompt = `You are an expert world builder for a text adventure RPG.
 
@@ -317,12 +326,18 @@ RULES:
 - The last few nodes should be increasingly dangerous (high/deadly).
 - Connections should form a branching path, not a straight line.
 
+ADDITIONAL TASK - Art Style Prompt:
+Based on the worldview, generate a short but precise "art style prompt" (in English) that describes the ideal illustration style for this world. This prompt will be prepended to ALL image generation requests (maps, character portraits, scene illustrations) to ensure a unified visual style throughout the game.
+Consider: color palette, rendering technique (e.g., watercolor, cel-shaded, oil painting, pixel art, digital painting), lighting mood, level of detail, art influences or references.
+Example: "Dark gothic oil painting style, muted desaturated colors with deep crimson accents, dramatic chiaroscuro lighting, intricate pen-and-ink linework, reminiscent of Berserk manga and Castlevania concept art"
+
 ${langInstruction}
 
 Return ONLY a JSON object with this EXACT structure (no markdown):
 {
   "id": "w1",
   "name": "WorldName",
+  "artStylePrompt": "A concise English art style description for unified visual generation...",
   "nodes": [
     {
       "id": "n1",
@@ -354,17 +369,25 @@ Return ONLY a JSON object with this EXACT structure (no markdown):
     throw new Error("Invalid world data structure");
   }
 
-  return parsed as WorldData;
+  // Extract artStylePrompt and return it separately
+  const artStylePrompt: string = parsed.artStylePrompt || '';
+  delete parsed.artStylePrompt;
+
+  return { worldData: parsed as WorldData, artStylePrompt };
 }
 
 /**
  * Generate a world map image based on the topology data.
  * Returns base64-encoded PNG data.
  */
-export async function generateMapImage(worldData: WorldData, worldview: string): Promise<string | undefined> {
+export async function generateMapImage(worldData: WorldData, worldview: string, artStylePrompt?: string): Promise<string | undefined> {
   const nodeDescriptions = worldData.nodes.map(n =>
     `${n.name}(${n.type}, ${n.safetyLevel}) 连接: ${n.connections.join(', ')}`
   ).join('\n');
+
+  const styleBlock = artStylePrompt
+    ? `\n\nMANDATORY ART STYLE (apply this style to the entire illustration):\n${artStylePrompt}`
+    : '';
 
   const prompt = `Generate a highly detailed, top-down RPG world map illustration perfectly adapted to this specific universe:
 
@@ -378,7 +401,7 @@ Art Style & Rendering Instructions:
 1. STRICT AESTHETIC MATCH: The visual style MUST strictly reflect the "Core Worldview". (e.g., If the lore is Sci-Fi, use holographic/neon blueprint aesthetics; if Post-Apocalyptic, use a gritty, weathered survivalist paper style; if Dark Fantasy, use ancient, worn parchment with gothic ink).
 2. TOPOLOGY & ICONS: Clearly depict the locations as distinct nodes. Use specific architectural markers based on their types (dense buildings for 'city', scattered structures for 'town/village', terrain hazards/nature for 'wilderness'). 
 3. CONNECTIVITY: Draw clear, stylized routes, roads, or paths connecting the connected nodes.
-4. VIEWPOINT & VIBE: Bird's-eye view, atmospheric, immersive. Designed as a functional UI map screen for a sandbox RPG. Include stylized map pins/markers for locations.`;
+4. VIEWPOINT & VIBE: Bird's-eye view, atmospheric, immersive. Designed as a functional UI map screen for a sandbox RPG. Include stylized map pins/markers for locations.${styleBlock}`;
 
   try {
     const imageResult = await ai.models.generateContent({
@@ -399,6 +422,51 @@ Art Style & Rendering Instructions:
     }
   } catch (e) {
     console.error("Map image generation failed", e);
+  }
+  return undefined;
+}
+
+/**
+ * Generate a 1:1 512px portrait photo for the AI character.
+ */
+export async function generateCharacterPortrait(appearancePrompt: string, worldview: string, artStylePrompt?: string): Promise<string | undefined> {
+  const styleBlock = artStylePrompt
+    ? `\n\nMANDATORY ART STYLE (apply this style to the portrait):\n${artStylePrompt}`
+    : '';
+
+  const prompt = `Generate a high-quality character portrait ID photo (bust shot, facing forward, neutral background).
+
+Character Visual Description: ${appearancePrompt}
+
+World Setting: ${worldview}
+
+Style: Semi-realistic anime/illustration style. Clean lighting, sharp details. The character should look directly at the camera. Background should be simple and non-distracting.${styleBlock}`;
+
+  try {
+    const imageResult = await ai.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        imageConfig: {
+          aspectRatio: "1:1",
+          imageSize: "512px"
+        },
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+        ]
+      }
+    });
+
+    for (const part of imageResult.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return part.inlineData.data;
+      }
+    }
+  } catch (e) {
+    console.error("Character portrait generation failed", e);
   }
   return undefined;
 }
