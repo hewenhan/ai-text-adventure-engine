@@ -1,4 +1,4 @@
-import { ai, TEXT_MODEL, IMAGE_MODEL } from '../lib/gemini';
+import { ai, TEXT_MODEL, PRO_MODEL, PRO_IMAGE_MODEL, IMAGE_MODEL, LITE_MODEL } from '../lib/gemini';
 import type { IntentResult, WorldData } from '../types/game';
 
 export async function generateSummary(currentSummary: string, messagesToSummarize: any[], language: 'zh' | 'en' = 'zh'): Promise<string | undefined> {
@@ -130,7 +130,7 @@ export async function fleshOutCharacterProfile(worldview: string, baseName: stri
   `;
   
   const result = await ai.models.generateContent({
-    model: TEXT_MODEL,
+    model: PRO_MODEL,
     contents: [{ role: 'user', parts: [{ text: prompt }] }]
   });
 
@@ -203,7 +203,7 @@ If the player wants to move but doesn't specify a clear connected destination, s
 No markdown formatting.`;
 
   const result = await ai.models.generateContent({
-    model: TEXT_MODEL,
+    model: LITE_MODEL,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { responseMimeType: 'application/json' }
   });
@@ -267,7 +267,7 @@ Return ONLY a JSON object with this EXACT structure (no markdown):
 }`;
 
   const result = await ai.models.generateContent({
-    model: TEXT_MODEL,
+    model: PRO_MODEL,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { responseMimeType: 'application/json' }
   });
@@ -284,4 +284,50 @@ Return ONLY a JSON object with this EXACT structure (no markdown):
   }
 
   return parsed as WorldData;
+}
+
+/**
+ * Generate a world map image based on the topology data.
+ * Returns base64-encoded PNG data.
+ */
+export async function generateMapImage(worldData: WorldData, worldview: string): Promise<string | undefined> {
+  const nodeDescriptions = worldData.nodes.map(n =>
+    `${n.name}(${n.type}, ${n.safetyLevel}) 连接: ${n.connections.join(', ')}`
+  ).join('\n');
+
+  const prompt = `Generate a highly detailed, top-down RPG world map illustration perfectly adapted to this specific universe:
+
+World Name: "${worldData.name}"
+Core Worldview & Lore: "${worldview}"
+
+Geographical Nodes & Connections:
+${nodeDescriptions}
+
+Art Style & Rendering Instructions:
+1. STRICT AESTHETIC MATCH: The visual style MUST strictly reflect the "Core Worldview". (e.g., If the lore is Sci-Fi, use holographic/neon blueprint aesthetics; if Post-Apocalyptic, use a gritty, weathered survivalist paper style; if Dark Fantasy, use ancient, worn parchment with gothic ink).
+2. TOPOLOGY & ICONS: Clearly depict the locations as distinct nodes. Use specific architectural markers based on their types (dense buildings for 'city', scattered structures for 'town/village', terrain hazards/nature for 'wilderness'). 
+3. CONNECTIVITY: Draw clear, stylized routes, roads, or paths connecting the connected nodes.
+4. VIEWPOINT & VIBE: Bird's-eye view, atmospheric, immersive. Designed as a functional UI map screen for a sandbox RPG. Include stylized map pins/markers for locations.`;
+
+  try {
+    const imageResult = await ai.models.generateContent({
+      model: PRO_IMAGE_MODEL,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        imageConfig: {
+          aspectRatio: "16:9",
+          imageSize: "2K"
+        }
+      }
+    });
+
+    for (const part of imageResult.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return part.inlineData.data;
+      }
+    }
+  } catch (e) {
+    console.error("Map image generation failed", e);
+  }
+  return undefined;
 }

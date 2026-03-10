@@ -553,6 +553,13 @@ OUTPUT FORMAT (JSON ONLY):
           if (state.history[i].bgmKey) { selectedBgmKey = state.history[i].bgmKey; break; }
         }
       }
+      // Fallback: if still no BGM (e.g. first turn, empty history), pick one for current tension
+      if (!selectedBgmKey) {
+        const bgmFallback = BGM_LIST[resolution.newTensionLevel as keyof typeof BGM_LIST] || [];
+        selectedBgmKey = bgmFallback.length > 0
+          ? bgmFallback[Math.floor(Math.random() * bgmFallback.length)]
+          : undefined;
+      }
 
       // ── Image generation ──
       let imagePromise: Promise<string | undefined> = Promise.resolve(undefined);

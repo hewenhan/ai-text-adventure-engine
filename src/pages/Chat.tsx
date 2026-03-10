@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useGame } from '../contexts/GameContext';
 import { useAuth } from '../contexts/AuthContext';
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertCircle, Backpack, Loader2, Save } from 'lucide-react';
+import { AlertCircle, Backpack, Loader2, Map, Save } from 'lucide-react';
 import { PlayerProfile, DEFAULT_LOADING_MESSAGES, INITIAL_STATE } from '../types/game';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { ChatMessageItem } from '../components/ChatMessageItem';
@@ -12,13 +12,15 @@ import { useBGM } from '../hooks/useBGM';
 import { ChatInput } from '../components/ChatInput';
 import { ProfileModal } from '../components/ProfileModal';
 import { StatusSidebar } from '../components/StatusSidebar';
+import { MapOverlay } from '../components/MapOverlay';
 import { FleshingOutOverlay } from '../components/FleshingOutOverlay';
-import { fleshOutCharacterProfile, fetchCustomLoadingMessages, generateWorldData } from '../services/aiService';
+import { fleshOutCharacterProfile, fetchCustomLoadingMessages, generateWorldData, generateMapImage } from '../services/aiService';
 
 export default function Chat() {
   const { state, updateState, exportSave } = useGame();
   const { isAuthenticated } = useAuth();
   const [showStatus, setShowStatus] = useState(false);
+  const [showMap, setShowMap] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   
@@ -127,6 +129,14 @@ export default function Chat() {
             currentHouseId: spawnHouse?.id || null,
             pacingState: { tensionLevel: 0, turnsInCurrentLevel: 0 }
           });
+
+          // Generate map image in background (non-blocking)
+          generateMapImage(worldData, state.worldview).then(base64 => {
+            if (base64) {
+              const mapUrl = `data:image/png;base64,${base64}`;
+              updateState({ mapImageUrl: mapUrl });
+            }
+          }).catch(e => console.error("Map image generation failed", e));
         } catch (error) {
           console.error("Failed to generate world data", error);
         } finally {
@@ -290,6 +300,13 @@ export default function Chat() {
             <Save className="w-4 h-4 text-zinc-400" />
           </button>
           <button 
+            onClick={() => setShowMap(true)}
+            title="世界地图"
+            className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors"
+          >
+            <Map className="w-4 h-4 text-zinc-400" />
+          </button>
+          <button 
             onClick={() => setShowStatus(true)}
             title="背包与状态"
             className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors"
@@ -358,6 +375,12 @@ export default function Chat() {
       <AnimatePresence>
         {showStatus && (
           <StatusSidebar state={state} onClose={() => setShowStatus(false)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showMap && (
+          <MapOverlay state={state} onClose={() => setShowMap(false)} />
         )}
       </AnimatePresence>
 

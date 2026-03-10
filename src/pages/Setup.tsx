@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useGame } from '../contexts/GameContext';
 import { useNavigate } from 'react-router-dom';
-import { ai, TEXT_MODEL } from '../lib/gemini';
+import { ai, PRO_MODEL } from '../lib/gemini';
 import { motion, AnimatePresence } from 'motion/react';
 import { Loader2 } from 'lucide-react';
 import { PlayerProfile, DEFAULT_LOADING_MESSAGES } from '../types/game';
@@ -71,7 +71,7 @@ export default function Setup() {
       `;
       
       const result = await ai.models.generateContent({
-        model: TEXT_MODEL,
+        model: PRO_MODEL,
         contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
 
