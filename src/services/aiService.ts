@@ -71,6 +71,8 @@ export async function generateTurn(fullPrompt: string): Promise<any> {
   return responseJson;
 }
 
+export const IMAGE_PROHIBITED_SENTINEL = '__PROHIBITED_CONTENT__';
+
 export async function generateImage(imagePrompt: string): Promise<string | undefined> {
   try {
     const imageResult = await ai.models.generateContent({
@@ -83,6 +85,12 @@ export async function generateImage(imagePrompt: string): Promise<string | undef
         }
       }
     });
+
+    const finishReason = imageResult.candidates?.[0]?.finishReason;
+    if (finishReason === 'PROHIBITED_CONTENT') {
+      console.error('Image generation blocked: PROHIBITED_CONTENT', imageResult.candidates?.[0]?.finishMessage);
+      return IMAGE_PROHIBITED_SENTINEL;
+    }
 
     for (const part of imageResult.candidates?.[0]?.content?.parts || []) {
       if (part.inlineData) {
@@ -180,26 +188,50 @@ export async function extractIntent(
   currentNodeId: string,
   currentHouseId: string | null,
   visibleContext: string,
-  connectedNodeIds: string[],
+  connectedNodesInfo: string,
+  visibleHousesInfo: string,
+  currentObjectiveDesc: string | null,
   language: 'zh' | 'en' = 'zh'
 ): Promise<IntentResult> {
   const prompt = `You are an intent classifier for a text adventure game. Classify the player's action into ONE intent category.
 
 Current Location: Node "${currentNodeId}", House "${currentHouseId || 'outdoors'}"
 Visible Environment: ${visibleContext}
-Connected Nodes the player can move to: ${connectedNodeIds.join(', ')}
-
-Player Input: "${userInput}"
+Connected Nodes: ${connectedNodesInfo}
+Visible Houses: ${visibleHousesInfo}
+Current Objective: ${currentObjectiveDesc || '无 (None - 玩家当前漫无目的，若提议去未知远处，请务必判定为 seek_quest)'}
 
 Intent Categories:
-- "idle": Resting, chatting, socializing, examining self, non-action activities
-- "explore": Searching, investigating, looting, opening containers, examining surroundings
-- "combat": Fighting, attacking, using weapons, defending against threats
-- "suicidal_idle": Reckless/self-destructive behavior in a dangerous area
-- "move": Any movement to a different location (includes retreat, fleeing, traveling). You MUST extract the target node/house ID if mentioned.
+- "seek_quest": [HIGHEST PRIORITY] The player suggests, demands, or mentions traveling to a MACRO-DESTINATION (e.g., Internet Cafe, School, Hospital) that is ABSENT from the "Connected Nodes" and "Visible Houses" lists. EVEN IF the sentence is wrapped in a joke, a bet, or complaining about being sleepy/bored, IF it contains a request to go to a NEW UNLISTED place, you MUST choose seek_quest.
+- "idle": Roleplaying, resting, chatting, eating/drinking in the current location.[CRITICAL EXCLUSION: If the text contains ANY suggestion to go to a macro-destination not on the lists, DO NOT choose idle. Action overrides chatting.]
+- "explore": Actively searching, investigating, looting, OR aimless wandering/scouting within the CURRENT area to find new things.
+- "combat": Fighting, attacking, using weapons, defending against threats.
+- "suicidal_idle": Reckless/self-destructive behavior in a dangerous area.
+- "move": Traveling ONLY to a destination explicitly listed in "Connected Nodes" or "Visible Houses".
 
-Return ONLY a JSON object: { "intent": "idle|explore|combat|suicidal_idle|move", "targetId": "nodeId_or_null" }
-If the player wants to move but doesn't specify a clear connected destination, set targetId to null.
+=== EXAMPLES (LEARN FROM THESE) ===
+Example 1:
+Visible Environment: 露天小龙虾摊
+Connected Nodes: n2 (城中村老区), n3 (百脑汇电脑城)
+Player Input: "天快亮了，再去网吧验证咱们的赌局我就睡着啦！"
+Output: {"intent": "seek_quest", "targetId": null}
+(Reason: "网吧" is a macro-destination NOT in the connected lists. The chatting/bet context is overridden by the travel request.)
+
+Example 2:
+Player Input: "老板，这龙虾太辣了，我去旁边买瓶水。"
+Output: {"intent": "idle", "targetId": null}
+(Reason: Micro-flavor roleplaying in the immediate area. Not leaving the macro-node.)
+
+Example 3:
+Player Input: "别磨叽了，直接去城中村老区！"
+Output: {"intent": "move", "targetId": "n2"}
+(Reason: Explicitly moving to a connected node list.)
+
+=== REAL TASK ===
+Player Input: "${userInput}"
+
+Return ONLY a JSON object: { "intent": "idle|explore|combat|suicidal_idle|move|seek_quest", "targetId": "nodeId_or_houseId_or_null" }
+IMPORTANT: If targetId is null, use the literal null value (targetId: null), NOT the string "null".
 No markdown formatting.`;
 
   const result = await ai.models.generateContent({
@@ -214,7 +246,7 @@ No markdown formatting.`;
   try {
     const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleaned);
-    const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move'];
+    const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest'];
     if (validIntents.includes(parsed.intent)) {
       return { intent: parsed.intent, targetId: parsed.targetId || null };
     }

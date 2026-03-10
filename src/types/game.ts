@@ -26,7 +26,7 @@ export interface WorldData {
 }
 
 // --- Intent Types ---
-export type IntentType = 'idle' | 'explore' | 'combat' | 'suicidal_idle' | 'move';
+export type IntentType = 'idle' | 'explore' | 'combat' | 'suicidal_idle' | 'move' | 'seek_quest';
 
 export interface IntentResult {
   intent: IntentType;
@@ -96,6 +96,13 @@ export interface GameState {
     tensionLevel: 0 | 1 | 2 | 3 | 4;
     turnsInCurrentLevel: number;
   };
+
+  // 6. 宏观目标追踪系统
+  currentObjective: {
+    targetNodeId: string;
+    targetHouseId: string;
+    description: string;
+  } | null;
 }
 
 export interface ChatMessage {
@@ -204,5 +211,8 @@ export const INITIAL_STATE: GameState = {
   pacingState: {
     tensionLevel: 0,
     turnsInCurrentLevel: 0
-  }
+  },
+
+  // Objective
+  currentObjective: null
 };

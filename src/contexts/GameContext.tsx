@@ -16,7 +16,9 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<GameState>(() => {
     const saved = localStorage.getItem('ai_rpg_save');
-    return saved ? JSON.parse(saved) : INITIAL_STATE;
+    if (!saved) return INITIAL_STATE;
+    const parsed = JSON.parse(saved);
+    return { ...INITIAL_STATE, ...parsed, currentObjective: parsed.currentObjective ?? null };
   });
 
   useEffect(() => {
@@ -73,6 +75,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             ? parsed.pacingState.turnsInCurrentLevel
             : INITIAL_STATE.pacingState.turnsInCurrentLevel
         },
+
+        // Objective tracking
+        currentObjective: parsed.currentObjective ?? null,
         
         // Migration for history: Ensure all messages have IDs
         history: Array.isArray(parsed.history) 

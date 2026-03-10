@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { X, Heart, Shield, MapPin } from 'lucide-react';
+import { X, Heart, Shield, MapPin, Target } from 'lucide-react';
 import { GameState } from '../types/game';
 
 interface StatusSidebarProps {
@@ -88,6 +88,18 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
             </div>
           </div>
 
+          {/* Current Objective */}
+          {state.currentObjective && (
+            <div>
+              <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider flex items-center gap-1">
+                <Target className="w-3.5 h-3.5" /> 当前目标
+              </h3>
+              <div className="bg-amber-950/30 border border-amber-800/50 p-3 rounded-lg text-sm text-amber-200">
+                🎯 {state.currentObjective.description}
+              </div>
+            </div>
+          )}
+
           {/* Inventory */}
           <div>
             <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">物品栏</h3>
@@ -109,17 +121,34 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
             <div>
               <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">探索进度</h3>
               <div className="space-y-2">
-                {Object.entries(state.progressMap).map(([key, val]) => (
+                {Object.entries(state.progressMap).map(([key, val]) => {
+                  // Resolve display name from key like "node_n3" or "house_h2_1"
+                  let displayName = key;
+                  if (state.worldData) {
+                    if (key.startsWith('node_')) {
+                      const nodeId = key.replace('node_', '');
+                      const node = state.worldData.nodes.find(n => n.id === nodeId);
+                      if (node) displayName = `${node.name}（区域）`;
+                    } else if (key.startsWith('house_')) {
+                      const houseId = key.replace('house_', '');
+                      for (const node of state.worldData.nodes) {
+                        const house = node.houses.find(h => h.id === houseId);
+                        if (house) { displayName = `${house.name}（建筑）`; break; }
+                      }
+                    }
+                  }
+                  return (
                   <div key={key} className="text-sm">
                     <div className="flex justify-between text-zinc-300">
-                      <span>{key}</span>
+                      <span>{displayName}</span>
                       <span>{val}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                       <div className="h-full bg-blue-500 rounded-full" style={{ width: `${val}%` }} />
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
