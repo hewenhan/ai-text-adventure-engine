@@ -70,7 +70,7 @@
     ```bash
     npm run dev
     ```
-    打开浏览器访问 `http://localhost:5173`，世界等你探索。
+    打开浏览器访问 `http://localhost:5173`，世界等你探索
 
 ---
 
