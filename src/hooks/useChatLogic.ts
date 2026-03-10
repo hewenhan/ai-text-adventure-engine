@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import { generateSummary, generateTurn, generateImage, extractIntent, IMAGE_PROHIBITED_SENTINEL } from '../services/aiService';
 import { uploadImageToDrive } from '../lib/drive';
+import { D20Resolver } from '../lib/D20Resolver';
 import {
   SUMMARY_THRESHOLD, KEEP_RECENT_TURNS, BGM_LIST,
   type GameState, type IntentResult, type NodeData, type HouseData
@@ -76,341 +77,7 @@ function getHpDescription(hp: number, language: 'zh' | 'en'): string {
   return 'Critically wounded, on the verge of collapse';
 }
 
-// ─── D20 State Machine ────────────────────────────────────────
-
-interface TurnResolution {
-  newHp: number;
-  newLives: number;
-  newTensionLevel: 0 | 1 | 2 | 3 | 4;
-  newNodeId: string | null;
-  newHouseId: string | null;
-  newProgressMap: Record<string, number>;
-  newInventory: string[];
-  newIsGameOver: boolean;
-  narrativeInstruction: string;
-  roll: number;
-  isSuccess: boolean;
-}
-
-function resolveD20(
-  state: GameState,
-  intent: IntentResult,
-  roll: number
-): TurnResolution {
-  const res: TurnResolution = {
-    newHp: state.hp,
-    newLives: state.lives,
-    newTensionLevel: state.pacingState.tensionLevel,
-    newNodeId: state.currentNodeId,
-    newHouseId: state.currentHouseId,
-    newProgressMap: { ...state.progressMap },
-    newInventory: [...state.inventory],
-    newIsGameOver: false,
-    narrativeInstruction: '',
-    roll,
-    isSuccess: false,
-  };
-
-  const tension = state.pacingState.tensionLevel;
-  const currentNode = findNode(state, state.currentNodeId);
-
-  // ─── Tension 0 (Safe zone / Spawn default) ─────
-  if (tension === 0) {
-    if (intent.intent === 'move') {
-      // 离开安全区 → 强制升为 T1
-      const targetId = intent.targetId;
-      if (targetId && currentNode?.connections.includes(targetId)) {
-        res.newNodeId = targetId;
-        res.newHouseId = null;
-        res.newTensionLevel = 1;
-        res.narrativeInstruction = '【系统强制】：玩家选择离开安全区，踏入外部世界。当前紧张度强制升至1级（探索态）。请描写出发时的场景。';
-      } else {
-        res.narrativeInstruction = '【系统强制】：玩家尝试移动但目标位置不可达。请描写路被阻断。';
-      }
-      res.isSuccess = true;
-    } else {
-      // idle 纯休整
-      if (roll <= 18) {
-        res.newHp = Math.min(100, res.newHp + 5);
-        res.narrativeInstruction = '【系统强制】：安全区内纯剧情休整，维持现状，略微恢复体力。请描写平静的互动与氛围。';
-      } else {
-        res.newHp = Math.min(100, res.newHp + 15);
-        res.narrativeInstruction = `【系统大成功】：Roll=${roll}！极佳的休整！玩家获得了心理慰藉或找到了小甜头，HP大幅恢复！请发糖或描写极其温馨/幸运的互动。`;
-      }
-      res.isSuccess = true;
-    }
-    return applyDeathHook(res);
-  }
-
-  // ─── Tension 1 (Exploration / Progress accumulation) ─────
-  if (tension === 1) {
-    if (intent.intent === 'explore') {
-      const progressKey = state.currentHouseId
-        ? `house_${state.currentHouseId}`
-        : `node_${state.currentNodeId}`;
-
-      if (roll >= 1 && roll <= 3) {
-        // Accident → 0 progress, escalate to Tension 2
-        res.newTensionLevel = 2;
-        res.isSuccess = false;
-        res.narrativeInstruction = `【系统指令 - 大失败】：探索遭遇意外伏击/陷阱！进度+0，紧张度强制升至2级（冲突）。Roll=${roll}，请描写突如其来的危机。`;
-      } else if (roll >= 4 && roll <= 16) {
-        // Smooth → +15 progress
-        res.newProgressMap[progressKey] = Math.min(100, (res.newProgressMap[progressKey] || 0) + 15);
-        res.isSuccess = true;
-        res.narrativeInstruction = `【系统指令 - 成功】：探索顺利推进，进度+15（当前${res.newProgressMap[progressKey]}%）。Roll=${roll}，请描写发现线索/安全前进的场景。`;
-      } else {
-        // Lucky find → +40 progress
-        res.newProgressMap[progressKey] = Math.min(100, (res.newProgressMap[progressKey] || 0) + 40);
-        res.isSuccess = true;
-        res.narrativeInstruction = `【系统指令 - 奇遇】：探索发现隐藏物资！进度+40（当前${res.newProgressMap[progressKey]}%）。Roll=${roll}，请描写意外发现珍贵资源或隐藏通道的场景。`;
-      }
-    } else if (intent.intent === 'move') {
-      // Move in Tension 1: auto-success if connected
-      const targetId = intent.targetId;
-      if (targetId && currentNode?.connections.includes(targetId)) {
-        res.newNodeId = targetId;
-        res.newHouseId = null;
-        res.isSuccess = true;
-        res.narrativeInstruction = '【系统指令】：移动成功，玩家转移至新区域。请描写旅途与抵达新地点的见闻。';
-      } else if (targetId && currentNode) {
-        // Check if target is a house within current node
-        const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
-        const targetHouse = visibleHouses.find(h => h.id === targetId);
-        if (targetHouse) {
-          res.newHouseId = targetId;
-          res.isSuccess = true;
-          res.narrativeInstruction = `【系统指令】：玩家进入${targetHouse.name}。请描写进入该建筑的场景。`;
-        } else {
-          res.isSuccess = false;
-          res.narrativeInstruction = '【系统指令】：目标位置未揭盲或不可达。请描写找不到出路的场景。';
-        }
-      } else {
-        // No target: go to node outdoor if in house
-        if (state.currentHouseId) {
-          res.newHouseId = null;
-          res.isSuccess = true;
-          res.narrativeInstruction = '【系统指令】：玩家退出当前建筑，回到街区野外。请描写走出建筑的场景。';
-        } else {
-          res.isSuccess = false;
-          res.narrativeInstruction = '【系统指令】：玩家想移动但未指定明确方向。请询问玩家要去哪里。';
-        }
-      }
-    } else {
-      // combat in T1: treat as explore
-      res.isSuccess = roll >= 5;
-      res.narrativeInstruction = res.isSuccess
-        ? `【系统指令 - 成功】：玩家行为成功。Roll=${roll}，根据玩家的行动意图，请描写结果`
-        : `【系统指令 - 失败】：玩家行为失败，紧张度升至2级。Roll=${roll}，引入意外事件，进入小危机`;
-      if (!res.isSuccess) res.newTensionLevel = 2;
-    }
-    return applyMilestoneHook(applyDeathHook(res), state);
-  }
-
-  // ─── Tension 2 (轻度危机 - 杂兵/陷阱) ─────
-  if (tension === 2) {
-    if (intent.intent === 'move') {
-      // 战术撤退法则：无需 D20，无伤脱战退回 T1
-      res.newTensionLevel = 1;
-      res.isSuccess = true;
-      res.narrativeInstruction = '【系统强制 - 战术撤退】：玩家果断放弃探索，有序撤出！无伤脱战，紧张度降回 1 级。请描写安全撤离危机区域的过程。';
-    } else if (intent.intent === 'suicidal_idle' || intent.intent === 'idle') {
-      res.newHp -= 15;
-      res.newTensionLevel = 3;
-      res.isSuccess = false;
-      res.narrativeInstruction = `【系统大失败 - 危机发呆】：在危机面前消极应对！遭到杂兵/环境袭击，HP -15，紧张度恶化至 3 级（中度危机）。请描写主角因退缩而受伤的场面。`;
-    } else if (intent.intent === 'combat' || intent.intent === 'explore') {
-      if (roll >= 1 && roll <= 4) {
-        res.newHp -= 10;
-        res.newTensionLevel = 3;
-        res.isSuccess = false;
-        res.narrativeInstruction = `【系统战斗失败】：对抗受挫！HP -10，危机升级，紧张度升至 3 级。Roll=${roll}，请描写遭到压制受轻伤的场面。`;
-      } else if (roll >= 5 && roll <= 16) {
-        res.newTensionLevel = 1;
-        res.isSuccess = true;
-        res.narrativeInstruction = `【系统战斗胜利】：成功击退杂兵/解除危机！紧张度降回 1 级（探索态）。Roll=${roll}，请描写克服障碍后的喘息。`;
-      } else {
-        res.newTensionLevel = 1;
-        res.isSuccess = true;
-        res.narrativeInstruction = `【系统秒杀】：干净利落的秒杀/完美解除危机！紧张度降回 1 级。Roll=${roll}，请描写主角展现高超技巧的帅气瞬间。`;
-      }
-    }
-    return applyDeathHook(res);
-  }
-
-  // ─── Tension 3 (中度危机 - 精英怪/绝境) ─────
-  if (tension === 3) {
-    if (intent.intent === 'move') {
-      const targetId = intent.targetId;
-      let canMove = false;
-      let nextNodeId = state.currentNodeId;
-      let nextHouseId = state.currentHouseId;
-      let targetName = "安全地带";
-
-      // 1. 优先校验目的地合法性（防瞬移）
-      if (targetId && currentNode?.connections.includes(targetId)) {
-        canMove = true;
-        nextNodeId = targetId;
-        nextHouseId = null;
-        targetName = "相邻区域";
-      } else if (targetId && currentNode) {
-        const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
-        const targetHouse = visibleHouses.find(h => h.id === targetId);
-        if (targetHouse) {
-          canMove = true;
-          nextNodeId = state.currentNodeId;
-          nextHouseId = targetId;
-          targetName = targetHouse.name;
-        }
-      } else if (!targetId && state.currentHouseId) {
-        canMove = true;
-        nextNodeId = state.currentNodeId;
-        nextHouseId = null;
-        targetName = "街区野外";
-      }
-
-      // 2. 结算突围 D20 (如果选了错的路，直接判死胡同惩罚)
-      if (!canMove) {
-        res.newHp -= 20;
-        res.isSuccess = false;
-        res.narrativeInstruction = `【系统指令 - 慌不择路】：试图逃跑，却在恐慌中冲向了死胡同或无法到达的区域！遭到敌人背后猛击，HP-20（当前${res.newHp}）。被逼回原地，维持 3 级紧张度。`;
-      } else {
-        // 目的地合法，开始惨烈的突围检定
-        if (roll >= 1 && roll <= 6) {
-          // [1-6] 撤离大失败：受损 -20，僵持
-          res.newHp -= 20;
-          res.isSuccess = false;
-          res.narrativeInstruction = `【系统指令 - 突围大失败】：试图向【${targetName}】撤退，但被敌人死死包围并重创！突围失败，HP-20（当前${res.newHp}）。退路被截断，陷入极其危险的僵持！维持 3 级紧张度。Roll=${roll}。`;
-        } else if (roll >= 7 && roll <= 18) {
-          // [7-18] 撤离受阻：受损 -10，僵持
-          res.newHp -= 10;
-          res.isSuccess = false;
-          res.narrativeInstruction = `【系统指令 - 突围受挫】：试图向【${targetName}】撤退，在包围圈的拉锯中挂彩！突围失败，HP-10（当前${res.newHp}）。双方继续僵持，未能脱困！维持 3 级紧张度。Roll=${roll}。`;
-        } else {
-          // [19-20] 大成功：极限逃脱
-          res.newNodeId = nextNodeId;
-          res.newHouseId = nextHouseId;
-          res.newTensionLevel = 1;
-          res.isSuccess = true;
-          res.narrativeInstruction = `【系统指令 - 极限逃生】：奇迹般地撕开了包围圈！成功逃往【${targetName}】，彻底摆脱了追击！紧张度骤降至 1 级。Roll=${roll}，请描写极其惊险刺激的绝境求生画面。`;
-        }
-      }
-    } else if (intent.intent === 'suicidal_idle' || intent.intent === 'idle') {
-      res.newHp -= 25;
-      res.newTensionLevel = 4;
-      res.isSuccess = false;
-      res.narrativeInstruction = `【系统大失败 - 找死】：面对精英威胁居然发呆！惨遭重击，HP -25，被逼入绝境，紧张度升至 4 级（死斗）。请描写极度惨烈的受击场面。`;
-    } else if (intent.intent === 'combat' || intent.intent === 'explore') {
-      if (roll >= 1 && roll <= 5) {
-        res.newHp -= 25;
-        res.newTensionLevel = 4;
-        res.isSuccess = false;
-        res.narrativeInstruction = `【系统战斗失败】：被精英敌人碾压！HP -25，局势失控，紧张度升至 4 级（死斗）。Roll=${roll}，请描写被残忍击退或身负重伤的画面。`;
-      } else if (roll >= 6 && roll <= 15) {
-        res.isSuccess = true; // 僵持算作平局
-        res.narrativeInstruction = `【系统战斗僵持】：与精英敌人势均力敌！不扣血，维持 3 级紧张度。Roll=${roll}，请描写刀光剑影、互相提防的拉锯战。`;
-      } else {
-        res.newTensionLevel = 1;
-        res.isSuccess = true;
-        res.narrativeInstruction = `【系统绝地反杀】：抓住破绽，华丽反杀！危机彻底解除，紧张度降回 1 级。Roll=${roll}，请描写惊险绝伦的致命反击。`;
-      }
-    }
-    return applyDeathHook(res);
-  }
-
-  // ─── Tension 4 (Boss / Death-lock) ─────
-  if (tension === 4) {
-    if (intent.intent === 'move') {
-      // Cannot flee! Treated as combat mega-fail
-      res.newHp -= 30;
-      res.isSuccess = false;
-      res.narrativeInstruction = `【系统指令 - 逃跑失败】：死斗封锁！无法逃离！背对敌人遭受重击，HP-30（当前${res.newHp}）。请描写逃跑被阻止并遭受重创的绝望场面。`;
-    } else if (intent.intent === 'combat') {
-      if (roll >= 1 && roll <= 8) {
-        // Heavy wound, stay T4
-        res.newHp -= 40;
-        res.isSuccess = false;
-        res.narrativeInstruction = `【系统指令 - 重伤】：被首领重创！HP-40（当前${res.newHp}），死斗继续。Roll=${roll}，请描写被首领压制的绝境。`;
-      } else if (roll >= 9 && roll <= 18) {
-        // Heroic struggle, stay T4
-        res.isSuccess = true;
-        res.narrativeInstruction = `【系统指令 - 拉锯战】：与首领势均力敌！死斗继续。Roll=${roll}，请描写英勇交锋的激烈场面。`;
-      } else {
-        // Critical kill! Drop to T0
-        res.newTensionLevel = 0;
-        res.isSuccess = true;
-        res.narrativeInstruction = `【系统指令 - 英雄斩杀】：致命一击！首领倒下！紧张度骤降至0级（胜利庆祝）。Roll=${roll}，请描写史诗级的最终一击与胜利的欢呼。`;
-      }
-    } else {
-      // idle/explore in T4: very bad idea
-      res.newHp -= 50;
-      res.isSuccess = false;
-      res.narrativeInstruction = `【系统指令 - 致命疏忽】：在死斗中发呆！被首领重击，HP-50（当前${res.newHp}）。Roll=${roll}，请描写因为分神而遭受猛击。`;
-    }
-    return applyDeathHook(res);
-  }
-
-  return res;
-}
-
-// ─── Interceptor Hooks ────────────────────────────────────────
-
-function applyDeathHook(res: TurnResolution): TurnResolution {
-  if (res.newHp <= 0) {
-    if (res.newLives > 0) {
-      res.newLives -= 1;
-      res.newHp = 20;
-      res.newTensionLevel = 1;
-      res.narrativeInstruction = `【系统强制】：致命伤！主角消耗复活币锁血（剩余${res.newLives}条命）。拖着残躯狼狈逃离，苟延残喘。` + res.narrativeInstruction;
-    } else {
-      res.newIsGameOver = true;
-      res.newHp = 0;
-      res.narrativeInstruction = '【系统强制】：生命值归零，彻底陨落。请撰写主角死亡的悲壮结局。';
-    }
-  }
-  return res;
-}
-
-function applyMilestoneHook(res: TurnResolution, state: GameState): TurnResolution {
-  // Check if any progress just hit 100 while in T1
-  if (res.newTensionLevel !== 1) return res;
-
-  const checkKey = state.currentHouseId
-    ? `house_${state.currentHouseId}`
-    : `node_${state.currentNodeId}`;
-  
-  const progress = res.newProgressMap[checkKey] || 0;
-  const oldProgress = state.progressMap[checkKey] || 0;
-  
-  if (progress >= 100 && oldProgress < 100) {
-    if (state.currentHouseId) {
-      // House cleared → becomes safe
-      res.newTensionLevel = 0;
-      res.narrativeInstruction += '\n【系统强制 - 里程碑】：该建筑威胁已被彻底肃清，变为安全屋，主角可安心休整。';
-    } else {
-      // Node fully explored → Boss spawns!
-      res.newTensionLevel = 4;
-      res.narrativeInstruction += '\n【系统强制 - 里程碑】：区域探索度满！惊动了统治该区域的核心危机，进入死斗！';
-    }
-  }
-  return res;
-}
-
-function findSafeRetreatNode(state: GameState): string | null {
-  if (!state.worldData || !state.currentNodeId) return null;
-  const currentNode = findNode(state, state.currentNodeId);
-  if (!currentNode) return null;
-
-  // Find a connected node with lower danger or the first connected node
-  for (const connId of currentNode.connections) {
-    const connNode = state.worldData.nodes.find(n => n.id === connId);
-    if (connNode && (connNode.safetyLevel === 'safe' || connNode.safetyLevel === 'low')) {
-      return connId;
-    }
-  }
-  // Fallback: return first connection
-  return currentNode.connections[0] || state.currentNodeId;
-}
+// ─── D20 State Machine (moved to src/lib/D20Resolver.ts) ─────
 
 // ─── Main Hook ────────────────────────────────────────────────
 
@@ -527,7 +194,7 @@ export function useChatLogic() {
 
       // ── Step 2: D20 State Machine Resolution ──
       const d20 = Math.floor(Math.random() * 20) + 1;
-      const resolution = resolveD20(state, intent, d20);
+      const resolution = D20Resolver.resolve(state, intent, d20);
 
       // 如果导演系统有叙事覆盖，替换 resolution 的 narrativeInstruction
       if (directorNarrativeOverride) {
@@ -547,6 +214,7 @@ export function useChatLogic() {
         inventory: resolution.newInventory,
         currentNodeId: resolution.newNodeId,
         currentHouseId: resolution.newHouseId,
+        transitState: resolution.newTransitState,
         progressMap: resolution.newProgressMap,
         pacingState: {
           tensionLevel: resolution.newTensionLevel,
@@ -562,23 +230,42 @@ export function useChatLogic() {
       const lastVisuals = [...state.history].reverse().find(m => m.currentSceneVisuals)?.currentSceneVisuals || 'None yet';
 
       // ── Build FOV-injected vision context with updated state ──
-      const updatedNode = findNode(state, resolution.newNodeId);
-      const updatedVision = updatedNode ? (() => {
-        const visHouses = getVisibleHouses(updatedNode, resolution.newProgressMap, state.currentObjective);
-        const hStr = visHouses.length > 0
-          ? visHouses.map(h => `${h.name}(${h.type})`).join(', ')
-          : '尚未发现可互动的建筑';
-        const updatedHouse = findHouse(updatedNode, resolution.newHouseId);
-        const locStr = updatedHouse
-          ? `当前位于: ${updatedNode.name} → ${updatedHouse.name}`
-          : `当前位于: ${updatedNode.name}(野外街区)`;
-        return `${locStr}. 已揭盲可互动的微观建筑: ${hStr}`;
-      })() : visionContext;
+      // Phase 2: 构建位置上下文，区分赶路/室内/野外
+      let locationContext = '';
+      if (resolution.newTransitState) {
+        const fromNode = findNode(state, resolution.newTransitState.fromNodeId);
+        const toNode = findNode(state, resolution.newTransitState.toNodeId);
+        locationContext = `【当前位置】：荒野旅途。正在从【${fromNode?.name || resolution.newTransitState.fromNodeId}】徒步赶往【${toNode?.name || resolution.newTransitState.toNodeId}】的路上。(当前路程进度：${resolution.newTransitState.pathProgress}%)。请侧重描写沿途的风景、路况或遭遇的危险，不要提及任何具体的建筑内部。`;
+      } else {
+        const updatedNode = findNode(state, resolution.newNodeId);
+        if (updatedNode) {
+          const visHouses = getVisibleHouses(updatedNode, resolution.newProgressMap, state.currentObjective);
+          const hStr = visHouses.length > 0
+            ? visHouses.map(h => `${h.name}(${h.type})`).join(', ')
+            : '尚未发现可互动的建筑';
+          const updatedHouse = findHouse(updatedNode, resolution.newHouseId);
+          if (updatedHouse) {
+            locationContext = `【当前位置】：室内搜刮。当前正位于【${updatedNode.name}】的微观建筑【${updatedHouse.name}】内部。已揭盲可互动的微观建筑: ${hStr}。请侧重描写室内的空间感、物资或幽闭的环境。`;
+          } else {
+            locationContext = `【当前位置】：街区/野外。正处于【${updatedNode.name}】的宏观区域。已揭盲可互动的微观建筑: ${hStr}。可看到周围的建筑。`;
+          }
+        } else {
+          locationContext = `【当前位置】：${visionContext}`;
+        }
+      }
 
-      const progressKey = resolution.newHouseId
+      // Phase 3: 室内/室外双轨进度防混淆
+      const activeProgressKey = resolution.newHouseId
         ? `house_${resolution.newHouseId}`
-        : `node_${resolution.newNodeId}`;
-      const currentProgress = resolution.newProgressMap[progressKey] || 0;
+        : (resolution.newTransitState ? 'transit' : `node_${resolution.newNodeId}`);
+
+      const currentProgress = resolution.newTransitState
+        ? resolution.newTransitState.pathProgress
+        : (resolution.newProgressMap[activeProgressKey] || 0);
+
+      const progressLabel = resolution.newTransitState
+        ? `当前徒步赶路进度: ${currentProgress}%`
+        : (resolution.newHouseId ? `当前室内搜刮进度: ${currentProgress}%` : `当前区域建筑发现进度: ${currentProgress}%`);
 
       const characterRoleString = `Name: ${state.characterSettings.name}\nGender: ${state.characterSettings.gender}\nDescription: ${state.characterSettings.description}\nPersonality: ${state.characterSettings.personality}\nBackground: ${state.characterSettings.background}\nHobbies: ${state.characterSettings.hobbies}`;
 
@@ -596,9 +283,9 @@ ${characterRoleString}
 性取向: ${state.playerProfile!.orientation}
 
 当前状态参数：
-- 绝对位置与可用视野：${updatedVision}
+- 绝对位置与可用视野：${locationContext}
 - 健康状态：${getHpDescription(resolution.newHp, state.language)}（HP: ${resolution.newHp}/100）
-- 探索进度：${currentProgress}%（【揭盲锁】：未满100%绝不可描写彻底探索完毕！）
+- ${progressLabel}（【揭盲锁】：未满100%绝不可描写彻底探索完毕！）
 - 紧张等级: ${resolution.newTensionLevel}（0=和平, 1=探索, 2=冲突, 3=危机, 4=死斗）
 
 上一场景视觉: "${lastVisuals}"

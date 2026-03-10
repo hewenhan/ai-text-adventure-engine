@@ -71,6 +71,29 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
           </button>
         </div>
 
+        {/* Transit Banner: 赶路状态横幅 */}
+        {state.transitState && (
+          <div className="bg-blue-900/20 border-b border-blue-500/30 p-4 shrink-0">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-blue-400 font-medium">
+                <span>{worldData.nodes.find(n => n.id === state.transitState!.fromNodeId)?.name}</span>
+                <ArrowRight className="w-4 h-4 animate-pulse" />
+                <span>{worldData.nodes.find(n => n.id === state.transitState!.toNodeId)?.name}</span>
+              </div>
+              <span className="text-blue-300 text-sm">{state.transitState.pathProgress}%</span>
+            </div>
+            <div className="w-full h-2 bg-blue-950 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-blue-500 rounded-full transition-all duration-500 relative"
+                style={{ width: `${state.transitState.pathProgress}%` }}
+              >
+                <div className="absolute inset-0 bg-white/20 animate-pulse" />
+              </div>
+            </div>
+            <div className="text-xs text-blue-500/70 mt-1">正在野外长途跋涉...</div>
+          </div>
+        )}
+
         {/* Content — on mobile: single scroll; on lg+: side-by-side, only cards scroll */}
         <div className="flex-1 overflow-y-auto lg:overflow-hidden p-4">
           <div className="flex flex-col lg:flex-row gap-6 lg:h-full">
@@ -191,17 +214,31 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
                       return (
                         <div
                           key={house.id}
-                          className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg border ${
+                          className={`flex flex-col gap-1 px-2 py-1.5 rounded-lg border w-full sm:w-auto ${
                             isCurrentHouse
-                              ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
-                              : `${SAFETY_COLORS[house.safetyLevel]} text-zinc-300`
+                              ? 'border-emerald-500/50 bg-emerald-500/10'
+                              : `${SAFETY_COLORS[house.safetyLevel]} bg-zinc-900/50`
                           }`}
                         >
-                          <Eye className="w-3 h-3" />
-                          <span>{house.name}</span>
-                          <span className="text-zinc-500">({TYPE_LABELS[house.type] || house.type})</span>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-1.5">
+                              <Eye className={`w-3 h-3 ${isCurrentHouse ? 'text-emerald-400' : 'text-zinc-400'}`} />
+                              <span className={`text-xs ${isCurrentHouse ? 'text-emerald-300 font-medium' : 'text-zinc-300'}`}>
+                                {house.name}
+                              </span>
+                              <span className="text-[10px] text-zinc-500">({TYPE_LABELS[house.type] || house.type})</span>
+                            </div>
+                            {houseProgress > 0 && (
+                              <span className="text-[10px] font-mono text-zinc-400">{houseProgress}%</span>
+                            )}
+                          </div>
                           {houseProgress > 0 && (
-                            <span className="text-zinc-500">{houseProgress}%</span>
+                            <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden mt-0.5">
+                              <div 
+                                className={`h-full rounded-full transition-all ${isCurrentHouse ? 'bg-emerald-500' : 'bg-zinc-500'}`}
+                                style={{ width: `${houseProgress}%` }}
+                              />
+                            </div>
                           )}
                         </div>
                       );

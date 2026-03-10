@@ -82,7 +82,7 @@ export const ChatMessageItem = React.memo(({ msg, characterName, imageUrl, onIma
                 e.preventDefault();
                 onDelete();
               }}
-              className="absolute top-2 right-2 p-1.5 bg-red-500/80 text-white rounded-full z-10 shadow-md hover:bg-red-600 transition-colors cursor-pointer backdrop-blur-sm"
+              className="absolute top-2 right-2 p-1.5 bg-red-500/80 text-white rounded-full z-10 shadow-md hover:bg-red-600 transition-all cursor-pointer backdrop-blur-sm opacity-0 group-hover:opacity-100"
               title="Debug: Delete Message"
               type="button"
             >

@@ -88,6 +88,13 @@ export interface GameState {
   currentNodeId: string | null;
   currentHouseId: string | null; // null = outdoors in Node
 
+  // 新增：旅途状态。null 表示在具体地点内；非 null 表示正在赶路。
+  transitState: {
+    fromNodeId: string;
+    toNodeId: string;
+    pathProgress: number; // 0-100%
+  } | null;
+
   // 4. Multi-dimensional exploration progress
   progressMap: Record<string, number>; // e.g. {"node_n1": 100, "house_h2_1": 45}
 
@@ -203,6 +210,7 @@ export const INITIAL_STATE: GameState = {
   currentWorldId: null,
   currentNodeId: null,
   currentHouseId: null,
+  transitState: null,
 
   // Progress
   progressMap: {},

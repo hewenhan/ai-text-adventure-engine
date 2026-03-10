@@ -18,7 +18,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem('ai_rpg_save');
     if (!saved) return INITIAL_STATE;
     const parsed = JSON.parse(saved);
-    return { ...INITIAL_STATE, ...parsed, currentObjective: parsed.currentObjective ?? null };
+    return { ...INITIAL_STATE, ...parsed, currentObjective: parsed.currentObjective ?? null, transitState: parsed.transitState ?? null };
   });
 
   useEffect(() => {
@@ -62,6 +62,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         currentWorldId: parsed.currentWorldId ?? null,
         currentNodeId: parsed.currentNodeId ?? null,
         currentHouseId: parsed.currentHouseId ?? null,
+        transitState: parsed.transitState ?? null,
 
         // Progress
         progressMap: parsed.progressMap ?? {},
