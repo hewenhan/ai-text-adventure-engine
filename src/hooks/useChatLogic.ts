@@ -590,6 +590,7 @@ OUTPUT FORMAT (JSON ONLY):
 
         for (let i = 1; i < messages.length - 1; i++) {
           await new Promise(resolve => setTimeout(resolve, calcDelay(messages[i - 1])));
+          // await new Promise(resolve => setTimeout(resolve, 1000));
           
           lastMsgId = uuidv4();
           addMessage({
@@ -603,7 +604,8 @@ OUTPUT FORMAT (JSON ONLY):
 
         const [fileName] = await Promise.all([
           imagePromise,
-          new Promise(resolve => setTimeout(resolve, calcDelay(messages[messages.length - 2])))
+          // new Promise(resolve => setTimeout(resolve, calcDelay(messages[messages.length - 2])))
+          await new Promise(resolve => setTimeout(resolve, 1000))
         ]);
 
         lastMsgId = uuidv4();
