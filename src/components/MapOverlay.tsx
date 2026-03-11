@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { X, MapPin, Lock, Eye, ArrowRight } from 'lucide-react';
-import { GameState } from '../types/game';
+import { useState, useEffect, useMemo } from 'react';
+import { motion } from 'motion/react';
+import { X, MapPin, Lock, Eye, ArrowRight, Target } from 'lucide-react';
+import { GameState, WorldData } from '../types/game';
 import { useAuth } from '../contexts/AuthContext';
 import { getImageUrlByName } from '../lib/drive';
+import { ZoomableImage } from './ZoomableImage';
 
 interface MapOverlayProps {
   state: GameState;
@@ -45,8 +46,6 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
   const currentNodeId = state.currentNodeId;
   const currentHouseId = state.currentHouseId;
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
-  const fullscreenRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
   const [mapImageUrl, setMapImageUrl] = useState<string | null>(null);
 
   // Load map image: either from Drive (filename) or direct data URL
@@ -149,10 +148,14 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
 
           {/* Right: Topology Graph — independently scrollable on desktop */}
           <div className="w-full lg:flex-[2_1_0%] lg:min-w-[340px] lg:overflow-y-auto lg:h-full space-y-3 pt-3">
+            {/* Connection Graph SVG */}
+            <TopologyGraph worldData={worldData} currentNodeId={currentNodeId} objectiveNodeId={state.currentObjective?.targetNodeId} transitState={state.transitState} />
+
             {worldData.nodes.map(node => {
               const isCurrent = node.id === currentNodeId;
+              const isObjectiveNode = state.currentObjective?.targetNodeId === node.id;
               const nodeProgress = state.progressMap[`node_${node.id}`] || 0;
-              // Houses visible based on progress (every 30% reveals one)
+              // Houses visible based on progress (every 30% reveals one) OR objective target
               const visibleCount = Math.floor(nodeProgress / 30);
 
               return (
@@ -169,6 +172,12 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
                     <div className="absolute -top-2.5 left-4 px-2 py-0.5 bg-emerald-600 text-white text-xs font-medium rounded-full flex items-center gap-1 shadow-lg">
                       <MapPin className="w-3 h-3" />
                       当前所在
+                    </div>
+                  )}
+                  {isObjectiveNode && !isCurrent && (
+                    <div className="absolute -top-2.5 left-4 px-2 py-0.5 bg-amber-600 text-white text-xs font-medium rounded-full flex items-center gap-1 shadow-lg">
+                      <Target className="w-3 h-3" />
+                      任务目标
                     </div>
                   )}
 
@@ -214,7 +223,8 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
                   {/* Houses */}
                   <div className="flex flex-wrap gap-2">
                     {node.houses.map((house, idx) => {
-                      const isVisible = idx < visibleCount || (isCurrent && house.id === currentHouseId);
+                      const isObjectiveHouse = state.currentObjective?.targetHouseId === house.id;
+                      const isVisible = idx < visibleCount || (isCurrent && house.id === currentHouseId) || isObjectiveHouse;
                       const isCurrentHouse = isCurrent && house.id === currentHouseId;
                       const houseProgress = state.progressMap[`house_${house.id}`] || 0;
 
@@ -236,6 +246,8 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
                           className={`flex flex-col gap-1 px-2 py-1.5 rounded-lg border w-full sm:w-auto ${
                             isCurrentHouse
                               ? 'border-emerald-500/50 bg-emerald-500/10'
+                              : isObjectiveHouse
+                              ? 'border-amber-500/50 bg-amber-500/10'
                               : `${SAFETY_COLORS[house.safetyLevel]} bg-zinc-900/50`
                           }`}
                         >
@@ -273,38 +285,155 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
       </motion.div>
 
       {/* Fullscreen Map Image Overlay */}
-      <AnimatePresence>
-        {isMapFullscreen && mapImageUrl && (
-          <motion.div
-            ref={fullscreenRef}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center overflow-hidden touch-none"
-            onClick={() => {
-              if (!isDragging.current) setIsMapFullscreen(false);
-            }}
-          >
-            <motion.img
-              src={mapImageUrl}
-              alt="Fullscreen Map"
-              drag
-              dragConstraints={fullscreenRef}
-              dragElastic={0.1}
-              onDragStart={() => { isDragging.current = true; }}
-              onDragEnd={() => {
-                setTimeout(() => { isDragging.current = false; }, 150);
-              }}
-              className="cursor-grab active:cursor-grabbing max-w-none max-h-none"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!isDragging.current) setIsMapFullscreen(false);
-              }}
-              draggable={false}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {mapImageUrl && (
+        <ZoomableImage src={mapImageUrl} alt="Fullscreen Map" isOpen={isMapFullscreen} onClose={() => setIsMapFullscreen(false)} />
+      )}
     </>
+  );
+}
+
+// ─── Topology Connection Graph ──────────────────────────────────
+
+const SAFETY_DOT_COLORS: Record<string, string> = {
+  safe: '#10b981',
+  low: '#3b82f6',
+  medium: '#f59e0b',
+  high: '#f97316',
+  deadly: '#ef4444',
+};
+
+function TopologyGraph({ worldData, currentNodeId, objectiveNodeId, transitState }: {
+  worldData: WorldData;
+  currentNodeId: string | null;
+  objectiveNodeId?: string;
+  transitState: GameState['transitState'];
+}) {
+  const nodes = worldData.nodes;
+
+  // BFS-layered layout for readable graph
+  const positions = useMemo(() => {
+    const layers: string[][] = [];
+    const visited = new Set<string>();
+    if (nodes.length === 0) return {};
+    const start = nodes[0].id;
+    const queue: { id: string; depth: number }[] = [{ id: start, depth: 0 }];
+    visited.add(start);
+
+    while (queue.length > 0) {
+      const { id, depth } = queue.shift()!;
+      if (!layers[depth]) layers[depth] = [];
+      layers[depth].push(id);
+      const node = nodes.find(n => n.id === id);
+      if (node) {
+        for (const connId of node.connections) {
+          if (!visited.has(connId)) {
+            visited.add(connId);
+            queue.push({ id: connId, depth: depth + 1 });
+          }
+        }
+      }
+    }
+    // Orphan nodes
+    for (const n of nodes) {
+      if (!visited.has(n.id)) {
+        if (!layers[layers.length]) layers.push([]);
+        layers[layers.length - 1].push(n.id);
+      }
+    }
+
+    const pos: Record<string, { x: number; y: number }> = {};
+    const colCount = layers.length;
+    for (let col = 0; col < colCount; col++) {
+      const layer = layers[col];
+      for (let row = 0; row < layer.length; row++) {
+        pos[layer[row]] = {
+          x: ((col + 1) / (colCount + 1)) * 100,
+          y: ((row + 1) / (layer.length + 1)) * 100,
+        };
+      }
+    }
+    return pos;
+  }, [nodes]);
+
+  // Deduplicated edges
+  const edges = useMemo(() => {
+    const set = new Set<string>();
+    const result: { from: string; to: string }[] = [];
+    for (const node of nodes) {
+      for (const connId of node.connections) {
+        const key = [node.id, connId].sort().join('-');
+        if (!set.has(key)) {
+          set.add(key);
+          result.push({ from: node.id, to: connId });
+        }
+      }
+    }
+    return result;
+  }, [nodes]);
+
+  const svgW = 420;
+  const svgH = Math.max(160, nodes.length * 28);
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-2 overflow-x-auto">
+      <div className="text-xs text-zinc-500 px-2 pb-1 font-medium">路线连接图</div>
+      <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full" style={{ minWidth: 280 }}>
+        {/* Edges */}
+        {edges.map(({ from, to }) => {
+          const p1 = positions[from];
+          const p2 = positions[to];
+          if (!p1 || !p2) return null;
+          const isTransitEdge = transitState && (
+            (transitState.fromNodeId === from && transitState.toNodeId === to) ||
+            (transitState.fromNodeId === to && transitState.toNodeId === from)
+          );
+          return (
+            <line
+              key={`${from}-${to}`}
+              x1={p1.x * svgW / 100}
+              y1={p1.y * svgH / 100}
+              x2={p2.x * svgW / 100}
+              y2={p2.y * svgH / 100}
+              stroke={isTransitEdge ? '#3b82f6' : '#3f3f46'}
+              strokeWidth={isTransitEdge ? 2.5 : 1.5}
+              strokeDasharray={isTransitEdge ? '6 3' : undefined}
+            />
+          );
+        })}
+        {/* Nodes */}
+        {nodes.map(node => {
+          const p = positions[node.id];
+          if (!p) return null;
+          const isCurrent = node.id === currentNodeId;
+          const isObjective = node.id === objectiveNodeId;
+          const cx = p.x * svgW / 100;
+          const cy = p.y * svgH / 100;
+          const fill = SAFETY_DOT_COLORS[node.safetyLevel] || '#71717a';
+          return (
+            <g key={node.id}>
+              {(isCurrent || isObjective) && (
+                <circle cx={cx} cy={cy} r={11} fill={isCurrent ? '#10b98130' : '#f59e0b30'} />
+              )}
+              <circle
+                cx={cx} cy={cy} r={6}
+                fill={fill}
+                stroke={isCurrent ? '#10b981' : isObjective ? '#f59e0b' : '#27272a'}
+                strokeWidth={isCurrent || isObjective ? 2.5 : 1.5}
+              />
+              <text
+                x={cx}
+                y={cy + 16}
+                textAnchor="middle"
+                fill={isCurrent ? '#10b981' : isObjective ? '#f59e0b' : '#a1a1aa'}
+                fontSize={9}
+                fontWeight={isCurrent || isObjective ? 'bold' : 'normal'}
+              >
+                {node.name.length > 8 ? node.name.slice(0, 7) + '…' : node.name}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }

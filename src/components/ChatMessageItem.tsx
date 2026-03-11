@@ -1,30 +1,33 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import { Image as ImageIcon, Loader2, Trash2 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
 import clsx from 'clsx';
 import { ChatMessage, ENABLE_DEBUG_UI } from '../types/game';
 import { getImageUrlByName } from '../lib/drive';
 import { useAuth } from '../contexts/AuthContext';
 import { IMAGE_PROHIBITED_SENTINEL } from '../services/aiService';
+import { TypewriterMessage, type TextSpeed } from './TypewriterMessage';
+import { ZoomableImage } from './ZoomableImage';
 
 interface ChatMessageItemProps {
   msg: ChatMessage;
   characterName: string;
   portraitUrl?: string | null;
+  animate?: boolean;
+  textSpeed?: TextSpeed;
+  isLastModelMessage?: boolean;
+  durationMs?: number;
+  onTypewriterComplete?: () => void;
   imageUrl?: string;
   onImageLoaded: (fileName: string, url: string) => void;
   onDelete?: () => void;
 }
 
-export const ChatMessageItem = React.memo(({ msg, characterName, portraitUrl, imageUrl, onImageLoaded, onDelete }: ChatMessageItemProps) => {
+export const ChatMessageItem = React.memo(({ msg, characterName, portraitUrl, imageUrl, onImageLoaded, onDelete, animate = false, textSpeed = 'normal', isLastModelMessage = false, durationMs, onTypewriterComplete }: ChatMessageItemProps) => {
   const { accessToken } = useAuth();
   const [isLoadingImage, setIsLoadingImage] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isAvatarFullscreen, setIsAvatarFullscreen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const avatarContainerRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -135,7 +138,18 @@ export const ChatMessageItem = React.memo(({ msg, characterName, portraitUrl, im
           
           {/* Text Content */}
           <div className="p-3 sm:p-4 text-sm leading-relaxed markdown-body break-words">
-            <ReactMarkdown>{msg.text}</ReactMarkdown>
+            {msg.role === 'model' ? (
+              <TypewriterMessage
+                text={msg.text}
+                animate={animate}
+                speed={textSpeed}
+                durationMs={durationMs}
+                isLastModelMessage={isLastModelMessage}
+                onComplete={onTypewriterComplete}
+              />
+            ) : (
+              <TypewriterMessage text={msg.text} animate={false} speed="instant" />
+            )}
           </div>
         </div>
       </div>
@@ -148,76 +162,14 @@ export const ChatMessageItem = React.memo(({ msg, characterName, portraitUrl, im
       )}
 
       {/* Fullscreen Image Overlay */}
-      <AnimatePresence>
-        {isFullscreen && imageUrl && (
-          <motion.div
-            ref={containerRef}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center overflow-hidden touch-none"
-            onClick={() => {
-              if (!isDragging.current) setIsFullscreen(false);
-            }}
-          >
-            <motion.img
-              src={imageUrl}
-              alt="Fullscreen"
-              drag
-              dragConstraints={containerRef}
-              dragElastic={0.1}
-              onDragStart={() => { isDragging.current = true; }}
-              onDragEnd={() => { 
-                setTimeout(() => { isDragging.current = false; }, 150); 
-              }}
-              className="cursor-grab active:cursor-grabbing max-w-none max-h-none"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!isDragging.current) {
-                  setIsFullscreen(false);
-                }
-              }}
-              draggable={false}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {imageUrl && (
+        <ZoomableImage src={imageUrl} alt="Fullscreen" isOpen={isFullscreen} onClose={() => setIsFullscreen(false)} />
+      )}
 
       {/* Fullscreen Avatar Overlay */}
-      <AnimatePresence>
-        {isAvatarFullscreen && portraitUrl && (
-          <motion.div
-            ref={avatarContainerRef}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center overflow-hidden touch-none"
-            onClick={() => {
-              if (!isDragging.current) setIsAvatarFullscreen(false);
-            }}
-          >
-            <motion.img
-              src={portraitUrl}
-              alt="Avatar Fullscreen"
-              drag
-              dragConstraints={avatarContainerRef}
-              dragElastic={0.1}
-              onDragStart={() => { isDragging.current = true; }}
-              onDragEnd={() => {
-                setTimeout(() => { isDragging.current = false; }, 150);
-              }}
-              className="cursor-grab active:cursor-grabbing max-w-none max-h-none"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!isDragging.current) {
-                  setIsAvatarFullscreen(false);
-                }
-              }}
-              draggable={false}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {portraitUrl && (
+        <ZoomableImage src={portraitUrl} alt="Avatar Fullscreen" isOpen={isAvatarFullscreen} onClose={() => setIsAvatarFullscreen(false)} />
+      )}
     </motion.div>
   );
 });

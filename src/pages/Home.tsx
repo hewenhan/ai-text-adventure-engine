@@ -96,6 +96,7 @@ export default function Home() {
         personality: '',
         background: '',
         hobbies: '',
+        appearancePrompt: '',
         isFleshedOut: false
       }, 
       language: tempLanguage,

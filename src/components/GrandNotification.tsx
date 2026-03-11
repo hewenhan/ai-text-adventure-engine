@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, useCallback } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 
@@ -30,24 +30,34 @@ export function useGrandNotification() {
 // ─── Provider ───────────────────────────────────────────────────
 
 export function GrandNotificationProvider({ children }: { children: React.ReactNode }) {
-  const [notification, setNotification] = useState<GrandNotificationData | null>(null);
+  const [queue, setQueue] = useState<GrandNotificationData[]>([]);
+  const [current, setCurrent] = useState<GrandNotificationData | null>(null);
 
   const show = useCallback((data: Omit<GrandNotificationData, 'id'>) => {
-    setNotification({ ...data, id: `${Date.now()}_${Math.random()}` });
+    const item: GrandNotificationData = { ...data, id: `${Date.now()}_${Math.random()}` };
+    setQueue(prev => [...prev, item]);
   }, []);
 
+  // 当没有正在显示的通知且队列不为空时，弹出下一个
+  useEffect(() => {
+    if (!current && queue.length > 0) {
+      setCurrent(queue[0]);
+      setQueue(prev => prev.slice(1));
+    }
+  }, [current, queue]);
+
   const dismiss = useCallback(() => {
-    setNotification(null);
+    setCurrent(null);
   }, []);
 
   return (
     <GrandNotificationContext.Provider value={{ show }}>
       {children}
       <AnimatePresence>
-        {notification && (
+        {current && (
           <GrandNotificationOverlay
-            key={notification.id}
-            data={notification}
+            key={current.id}
+            data={current}
             onDismiss={dismiss}
           />
         )}

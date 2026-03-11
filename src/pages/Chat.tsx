@@ -10,12 +10,15 @@ import { DebugOverlay } from '../components/DebugOverlay';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useBGM } from '../hooks/useBGM';
 import { ChatInput } from '../components/ChatInput';
+import { ProgressTracker } from '../components/ProgressTracker';
+import { type TextSpeed } from '../components/TypewriterMessage';
 import { ProfileModal } from '../components/ProfileModal';
 import { StatusSidebar } from '../components/StatusSidebar';
 import { MapOverlay } from '../components/MapOverlay';
 import { FleshingOutOverlay } from '../components/FleshingOutOverlay';
 import { DriveToast } from '../components/DriveToast';
 import { FakeProgressBar, FakeProgressBarHandle } from '../components/FakeProgressBar';
+import { FloatingObjective } from '../components/FloatingObjective';
 import { uploadImageToDrive, getImageUrlByName } from '../lib/drive';
 import { fleshOutCharacterProfile, fetchCustomLoadingMessages, generateWorldData, generateMapImage, generateCharacterPortrait } from '../services/aiService';
 
@@ -24,6 +27,7 @@ export default function Chat() {
   const { isAuthenticated, driveError, reconnectDrive, accessToken } = useAuth();
   const [showStatus, setShowStatus] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [textSpeed, setTextSpeed] = useState<TextSpeed>('normal');
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [driveToastDismissed, setDriveToastDismissed] = useState(false);
@@ -34,7 +38,10 @@ export default function Chat() {
   const worldProgressRef = useRef<FakeProgressBarHandle>(null);
   const characterProgressRef = useRef<FakeProgressBarHandle>(null);
 
-  const { isProcessing, handleTurn } = useChatLogic();
+  // 已播放过打字动画的消息 ID 集合（防止 Virtuoso 卸载/重挂时重新打字）
+  const animatedIdsRef = useRef<Set<string>>(new Set(state.history.map(m => m.id)));
+
+  const { isProcessing, handleTurn, flushPendingNotifications } = useChatLogic();
 
   // BGM: find the latest bgmKey from chat history
   const currentBgmKey = useMemo(() => {
@@ -151,7 +158,7 @@ export default function Chat() {
       if (!state.worldData && state.worldview && !isGeneratingWorld) {
         setIsGeneratingWorld(true);
         try {
-          const { worldData, artStylePrompt: aiGeneratedStyle } = await generateWorldData(state.worldview, state.language);
+          const { worldData, artStylePrompt: aiGeneratedStyle } = await generateWorldData(state.worldview, state.language, state.worldviewUserInput);
           // Spawn Rule: player starts in first node's first house, force it safe
           const spawnNode = worldData.nodes[0];
           const spawnHouse = spawnNode?.houses[0];
@@ -396,26 +403,47 @@ export default function Chat() {
         </div>
       </div>
 
+      {/* Progress Tracker */}
+      <ProgressTracker state={state} />
+
       {/* Chat Area */}
-      <div className="flex-1 p-4 space-y-6 h-full overflow-hidden">
+      <div className="flex-1 p-4 space-y-6 h-full overflow-hidden relative">
+        <AnimatePresence>
+          {state.currentObjective && (
+            <FloatingObjective description={state.currentObjective.description} />
+          )}
+        </AnimatePresence>
         <Virtuoso
           ref={virtuosoRef}
           data={state.history}
           initialTopMostItemIndex={state.history.length - 1}
           followOutput="smooth"
-          context={{ onDelete: handleDeleteMessage, imageUrls, characterName, onImageLoaded: handleImageLoaded, portraitUrl }}
-          itemContent={(index, msg, context) => (
-            <div className="pb-6">
-              <ChatMessageItem 
-                msg={msg} 
-                characterName={context.characterName}
-                portraitUrl={context.portraitUrl}
-                imageUrl={msg.imageFileName ? context.imageUrls[msg.imageFileName] : undefined}
-                onImageLoaded={context.onImageLoaded}
-                onDelete={() => context.onDelete(index)}
-              />
-            </div>
-          )}
+          context={{ onDelete: handleDeleteMessage, imageUrls, characterName, onImageLoaded: handleImageLoaded, portraitUrl, totalMessages: state.history.length, textSpeed, flushPendingNotifications, animatedIds: animatedIdsRef.current }}
+          itemContent={(index, msg, context) => {
+            const isLast = index === context.totalMessages - 1;
+            const isLastModel = msg.role === 'model' && isLast;
+            // 只有未播放过动画的消息才触发打字动画
+            const shouldAnimate = isLastModel && !context.animatedIds.has(msg.id);
+            return (
+              <div className="pb-6">
+                <ChatMessageItem 
+                  msg={msg} 
+                  characterName={context.characterName}
+                  portraitUrl={context.portraitUrl}
+                  imageUrl={msg.imageFileName ? context.imageUrls[msg.imageFileName] : undefined}
+                  onImageLoaded={context.onImageLoaded}
+                  onDelete={() => context.onDelete(index)}
+                  animate={shouldAnimate}
+                  textSpeed={context.textSpeed}
+                  isLastModelMessage={isLastModel}
+                  onTypewriterComplete={shouldAnimate ? () => {
+                    context.animatedIds.add(msg.id);
+                    context.flushPendingNotifications();
+                  } : undefined}
+                />
+              </div>
+            );
+          }}
           components={{
             Footer: () => (
               isProcessing ? (
@@ -455,7 +483,7 @@ export default function Chat() {
         />
       </div>
 
-      <ChatInput isProcessing={isProcessing} onSend={handleTurn} volume={volume} onVolumeChange={changeVolume} />
+      <ChatInput isProcessing={isProcessing} onSend={handleTurn} volume={volume} onVolumeChange={changeVolume} textSpeed={textSpeed} onTextSpeedChange={setTextSpeed} />
 
       <AnimatePresence>
         {showStatus && (

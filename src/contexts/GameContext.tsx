@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { GameState, INITIAL_STATE, ChatMessage, DEFAULT_LOADING_MESSAGES } from '../types/game';
+import { GameState, INITIAL_STATE, ChatMessage, DEFAULT_LOADING_MESSAGES, normalizeConnections } from '../types/game';
 import { v4 as uuidv4 } from 'uuid';
 
 interface GameContextType {
@@ -18,7 +18,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem('ai_rpg_save');
     if (!saved) return INITIAL_STATE;
     const parsed = JSON.parse(saved);
-    return { ...INITIAL_STATE, ...parsed, currentObjective: parsed.currentObjective ?? null, transitState: parsed.transitState ?? null, mapImageFileName: parsed.mapImageFileName ?? parsed.mapImageUrl ?? null, hpDescription: parsed.hpDescription ?? '', characterPortraitFileName: parsed.characterPortraitFileName ?? null };
+    const restored = { ...INITIAL_STATE, ...parsed, currentObjective: parsed.currentObjective ?? null, transitState: parsed.transitState ? { ...parsed.transitState, lockedTheme: parsed.transitState.lockedTheme ?? null } : null, exhaustedThemes: Array.isArray(parsed.exhaustedThemes) ? parsed.exhaustedThemes : [], mapImageFileName: parsed.mapImageFileName ?? parsed.mapImageUrl ?? null, hpDescription: parsed.hpDescription ?? '', characterPortraitFileName: parsed.characterPortraitFileName ?? null };
+    if (restored.worldData) restored.worldData = normalizeConnections(restored.worldData);
+    return restored;
   });
 
   useEffect(() => {
@@ -42,6 +44,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const migratedState: GameState = {
         characterSettings: { ...INITIAL_STATE.characterSettings, ...(parsed.characterSettings ?? {}) },
         worldview: parsed.worldview ?? INITIAL_STATE.worldview,
+        worldviewUserInput: parsed.worldviewUserInput ?? '',
         isFirstRun: parsed.isFirstRun ?? INITIAL_STATE.isFirstRun,
         summary: parsed.summary ?? INITIAL_STATE.summary,
         turnsSinceLastSummary: parsed.turnsSinceLastSummary ?? INITIAL_STATE.turnsSinceLastSummary,
@@ -58,16 +61,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         status: parsed.status ?? {},
 
         // Spatial fields
-        worldData: parsed.worldData ?? null,
+        worldData: parsed.worldData ? normalizeConnections(parsed.worldData) : null,
         mapImageFileName: parsed.mapImageFileName ?? parsed.mapImageUrl ?? null,
         currentWorldId: parsed.currentWorldId ?? null,
         currentNodeId: parsed.currentNodeId ?? null,
         characterPortraitFileName: parsed.characterPortraitFileName ?? null,
         currentHouseId: parsed.currentHouseId ?? null,
-        transitState: parsed.transitState ?? null,
+        transitState: parsed.transitState ? { ...parsed.transitState, lockedTheme: parsed.transitState.lockedTheme ?? null } : null,
 
-        // Progress
+        // Progress & dynamic memory
         progressMap: parsed.progressMap ?? {},
+        exhaustedThemes: Array.isArray(parsed.exhaustedThemes) ? parsed.exhaustedThemes : [],
 
         // Migration for pacingState
         pacingState: {

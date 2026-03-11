@@ -116,6 +116,7 @@ export default function Setup() {
       // 系统推荐：不设置固定提词，让 AI 自动生成
       updateState({
         worldview: selectedWorldview,
+        worldviewUserInput: inputWorldview,
         isFirstRun: false,
         loadingMessages: generatedLoadingMessages.length > 0 ? generatedLoadingMessages : DEFAULT_LOADING_MESSAGES,
       });
@@ -123,6 +124,7 @@ export default function Setup() {
       // 使用固定风格提词
       updateState({
         worldview: selectedWorldview,
+        worldviewUserInput: inputWorldview,
         isFirstRun: false,
         artStylePrompt: option.prompt,
         loadingMessages: generatedLoadingMessages.length > 0 ? generatedLoadingMessages : DEFAULT_LOADING_MESSAGES,

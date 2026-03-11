@@ -25,6 +25,26 @@ export interface WorldData {
   nodes: NodeData[];
 }
 
+/** 归一化节点连接为双向：如果 A 连接 B，则 B 也必须连接 A */
+export function normalizeConnections(worldData: WorldData): WorldData {
+  const nodeMap = new Map(worldData.nodes.map(n => [n.id, new Set(n.connections)]));
+  for (const node of worldData.nodes) {
+    for (const targetId of node.connections) {
+      const targetSet = nodeMap.get(targetId);
+      if (targetSet && !targetSet.has(node.id)) {
+        targetSet.add(node.id);
+      }
+    }
+  }
+  return {
+    ...worldData,
+    nodes: worldData.nodes.map(n => ({
+      ...n,
+      connections: Array.from(nodeMap.get(n.id) || n.connections),
+    })),
+  };
+}
+
 // --- Intent Types ---
 export type IntentType = 'idle' | 'explore' | 'combat' | 'suicidal_idle' | 'move' | 'seek_quest';
 
@@ -67,6 +87,8 @@ export interface GameState {
   // 1. Original base fields
   characterSettings: CharacterProfile;
   worldview: string;
+  /** 用户原始输入的世界观描述（用于辅助生成更准确的地图） */
+  worldviewUserInput: string;
   history: ChatMessage[];
   isFirstRun: boolean;
   summary: string;
@@ -96,7 +118,11 @@ export interface GameState {
     fromNodeId: string;
     toNodeId: string;
     pathProgress: number; // 0-100%
+    lockedTheme: string | null; // 当前旅途锁定的遭遇主题
   } | null;
+
+  // 动态记忆黑名单：已经历过的遭遇主题，不再重复
+  exhaustedThemes: string[];
 
   // 4. Multi-dimensional exploration progress
   progressMap: Record<string, number>; // e.g. {"node_n1": 100, "house_h2_1": 45}
@@ -198,6 +224,7 @@ export const DEFAULT_LOADING_MESSAGES = [
 export const INITIAL_STATE: GameState = {
   characterSettings: DEFAULT_CHARACTER,
   worldview: "",
+  worldviewUserInput: "",
   history: [],
   isFirstRun: true,
   summary: "",
@@ -221,6 +248,7 @@ export const INITIAL_STATE: GameState = {
   characterPortraitFileName: null,
   currentHouseId: null,
   transitState: null,
+  exhaustedThemes: [],
 
   // Progress
   progressMap: {},

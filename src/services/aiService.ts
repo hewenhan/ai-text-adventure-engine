@@ -1,6 +1,7 @@
 import { ai, TEXT_MODEL, PRO_MODEL, PRO_IMAGE_MODEL, IMAGE_MODEL, LITE_MODEL } from '../lib/gemini';
 import { HarmCategory, HarmBlockThreshold } from '@google/genai';
 import type { IntentResult, WorldData } from '../types/game';
+import { normalizeConnections } from '../types/game';
 
 export async function generateSummary(currentSummary: string, messagesToSummarize: any[], language: 'zh' | 'en' = 'zh'): Promise<string | undefined> {
   const textToSummarize = messagesToSummarize.map(m => `${m.role}: ${m.text}`).join('\n');
@@ -236,24 +237,37 @@ export async function extractIntent(
   visibleHousesInfo: string,
   currentObjectiveDesc: string | null,
   recentConversation: string,
-  language: 'zh' | 'en' = 'zh'
+  language: 'zh' | 'en' = 'zh',
+  tensionLevel: number = 0,
+  lastIntent: string | null = null
 ): Promise<IntentResult> {
+  // BUG2: 求生本能（Survival Instinct）强制法则
+  const survivalInstinctRule = tensionLevel >= 2
+    ? `\n\n【求生本能 (Survival Instinct) - 绝对强制法则】：
+当前紧张度 = ${tensionLevel}（${tensionLevel >= 3 ? '极度危险' : '危险'}状态）！上一次意图：${lastIntent || '无'}。
+在 Tension >= 2 的危险状态下，玩家任何带有情绪宣泄、恐慌、反抗、惊叫、咒骂、呐喊的文本（如"卧槽！"、"你这怪物别碰我！"、"啊啊啊"、"救命"、"滚开"等），哪怕没有明确的动作动词，都必须被归类为 "combat"（挣扎求生）。
+只有当玩家极其明确地表示放弃抵抗（如"我放弃了"、"我坐下等死"、"我不动了"、"随便吧"）时，才能判定为 "idle"。
+任何模糊的、情绪化的、带有求生本能的表达 → 强制归类为 "combat"。`
+    : '';
+
   const prompt = `You are an intent classifier for a text adventure game. Classify the player's action into ONE intent category.
 
 Current Location: Node "${currentNodeId}", House "${currentHouseId || 'outdoors'}"
 Visible Environment: ${visibleContext}
 Connected Nodes: ${connectedNodesInfo}
 Visible Houses: ${visibleHousesInfo}
+Current Tension Level: ${tensionLevel}
 Current Objective: ${currentObjectiveDesc || '\u65e0 (None - \u73a9\u5bb6\u5f53\u524d\u6f2b\u65e0\u76ee\u7684\uff0c\u82e5\u63d0\u8bae\u53bb\u672a\u77e5\u8fdc\u5904\uff0c\u8bf7\u52a1\u5fc5\u5224\u5b9a\u4e3a seek_quest)'}
 
 Recent Conversation Context (for understanding intent continuity):
 ${recentConversation || 'No prior conversation.'}
+${survivalInstinctRule}
 
 Intent Categories:
 - "seek_quest": [HIGHEST PRIORITY] The player suggests, demands, or mentions traveling to a MACRO-DESTINATION (e.g., Internet Cafe, School, Hospital) that is ABSENT from the "Connected Nodes" and "Visible Houses" lists. EVEN IF the sentence is wrapped in a joke, a bet, or complaining about being sleepy/bored, IF it contains a request to go to a NEW UNLISTED place, you MUST choose seek_quest.
 - "idle": Roleplaying, resting, chatting, eating/drinking in the current location.[CRITICAL EXCLUSION: If the text contains ANY suggestion to go to a macro-destination not on the lists, DO NOT choose idle. Action overrides chatting.]
 - "explore": Actively searching, investigating, looting, OR aimless wandering/scouting within the CURRENT area to find new things.
-- "combat": Fighting, attacking, using weapons, defending against threats.
+- "combat": Fighting, attacking, using weapons, defending against threats.${tensionLevel >= 2 ? ' [BOOSTED PRIORITY at high tension: emotional outbursts, panic, resistance = combat]' : ''}
 - "suicidal_idle": Reckless/self-destructive behavior in a dangerous area.
 - "move": Traveling ONLY to a destination explicitly listed in "Connected Nodes" or "Visible Houses".
 
@@ -308,11 +322,12 @@ No markdown formatting.`;
  * Phase 0: Generate complete world topology data (10 nodes with houses).
  * Called once during game initialization.
  */
-export async function generateWorldData(worldview: string, language: 'zh' | 'en' = 'zh'): Promise<{ worldData: WorldData; artStylePrompt: string }> {
+export async function generateWorldData(worldview: string, language: 'zh' | 'en' = 'zh', userInput?: string): Promise<{ worldData: WorldData; artStylePrompt: string }> {
   const langInstruction = language === 'zh' ? 'All names and descriptions MUST be in Chinese.' : 'All names and descriptions MUST be in English.';
+  const userInputSection = userInput ? `\n\nOriginal User Input (use this as additional context for more accurate world building): "${userInput}"` : '';
   const prompt = `You are an expert world builder for a text adventure RPG.
 
-Worldview: "${worldview}"
+Worldview: "${worldview}"${userInputSection}
 
 Task: Generate a complete topology map for this world with EXACTLY 10 nodes (locations) and multiple houses (buildings/places) within each node.
 
@@ -373,7 +388,10 @@ Return ONLY a JSON object with this EXACT structure (no markdown):
   const artStylePrompt: string = parsed.artStylePrompt || '';
   delete parsed.artStylePrompt;
 
-  return { worldData: parsed as WorldData, artStylePrompt };
+  // 归一化双向连接（AI 可能只生成单向连接）
+  const normalized = normalizeConnections(parsed as WorldData);
+
+  return { worldData: normalized, artStylePrompt };
 }
 
 /**

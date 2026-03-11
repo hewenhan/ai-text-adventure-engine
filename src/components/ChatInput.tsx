@@ -1,14 +1,17 @@
-import { Send, Volume2, VolumeX, Volume1 } from 'lucide-react';
+import { Send, Volume2, VolumeX, Volume1, ChevronsRight } from 'lucide-react';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import type { TextSpeed } from './TypewriterMessage';
 
 interface ChatInputProps {
   isProcessing: boolean;
   onSend: (message: string) => Promise<void | boolean>;
   volume: number;
   onVolumeChange: (v: number) => void;
+  textSpeed: TextSpeed;
+  onTextSpeedChange: (speed: TextSpeed) => void;
 }
 
-export function ChatInput({ isProcessing, onSend, volume, onVolumeChange }: ChatInputProps) {
+export function ChatInput({ isProcessing, onSend, volume, onVolumeChange, textSpeed, onTextSpeedChange }: ChatInputProps) {
   const [input, setInput] = useState("");
   const [showVolume, setShowVolume] = useState(false);
   const volumeRef = useRef<HTMLDivElement>(null);
@@ -89,6 +92,14 @@ export function ChatInput({ isProcessing, onSend, volume, onVolumeChange }: Chat
     isDragging.current = false;
   }, []);
 
+  const cycleTextSpeed = useCallback(() => {
+    const order: TextSpeed[] = ['normal', 'fast', 'instant'];
+    const idx = order.indexOf(textSpeed);
+    onTextSpeedChange(order[(idx + 1) % order.length]);
+  }, [textSpeed, onTextSpeedChange]);
+
+  const speedLabel = textSpeed === 'normal' ? '1x' : textSpeed === 'fast' ? '2x' : '∞';
+
   return (
     <div className="p-4 bg-zinc-900/50 backdrop-blur-md border-t border-zinc-800">
       <div className="max-w-3xl mx-auto relative flex items-center gap-2">
@@ -148,6 +159,28 @@ export function ChatInput({ isProcessing, onSend, volume, onVolumeChange }: Chat
             </div>
           )}
         </div>
+
+        {/* Text speed toggle */}
+        <button
+          onClick={cycleTextSpeed}
+          className={`p-2 border rounded-full transition-colors shrink-0 ${
+            textSpeed === 'normal'
+              ? 'bg-zinc-950 border-zinc-800 hover:bg-zinc-800'
+              : textSpeed === 'fast'
+              ? 'bg-amber-500/20 border-amber-500/40 hover:bg-amber-500/30'
+              : 'bg-red-500/20 border-red-500/40 hover:bg-red-500/30'
+          }`}
+          title={`打字速度: ${speedLabel}`}
+        >
+          <div className="relative w-4 h-4 flex items-center justify-center">
+            <ChevronsRight className={`w-4 h-4 ${
+              textSpeed === 'normal' ? 'text-zinc-400' : textSpeed === 'fast' ? 'text-amber-400' : 'text-red-400'
+            }`} />
+            <span className={`absolute -top-1 -right-1.5 text-[8px] font-bold ${
+              textSpeed === 'normal' ? 'text-zinc-500' : textSpeed === 'fast' ? 'text-amber-400' : 'text-red-400'
+            }`}>{speedLabel}</span>
+          </div>
+        </button>
 
         {/* Text input */}
         <div className="relative flex-1">

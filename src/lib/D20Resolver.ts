@@ -136,14 +136,17 @@ function buildT4Narrative(action: string, tier: number, roll: number, hpAfter: n
   return `【系统指令 - 致命疏忽】：在死斗中发呆！被首领重击，HP-50（当前${hpAfter}）。Roll=${roll}，请描写因为分神而遭受猛击。`;
 }
 
-function buildTransitNarrative(tier: number, roll: number, progress: number, fromName: string, toName: string): string {
+function buildTransitNarrative(tier: number, roll: number, progress: number, fromName: string, toName: string, tension: number): string {
   if (tier === 0) {
-    return `【系统指令 - 旅途遇袭】：在从【${fromName}】前往【${toName}】的旅途中遭遇袭击！路程无进展，紧张度上升。Roll=${roll}，请描写旅途中突发的危险遭遇。`;
+    if (tension >= 2) {
+      return `【系统指令 - 旅途遇袭】：在从【${fromName}】前往【${toName}】的旅途中遭遇危险袭击！路程无进展，紧张度上升。Roll=${roll}，请描写旅途中突发的激烈危险遭遇。`;
+    }
+    return `【系统指令 - 旅途受阻】：在从【${fromName}】前往【${toName}】的路上碰到了麻烦，耽搁了一阵。路程无进展。Roll=${roll}，请描写路况糟糕、需要绕路、天气突变等小阻碍（不要描写战斗或严重危险）。`;
   }
   if (tier === 2) {
-    return `【系统指令 - 旅途顺遂】：赶路大幅推进！路程进度达到${progress}%。Roll=${roll}，请描写沿途发现捷径或顺风顺水的旅途场景。`;
+    return `【系统指令 - 旅途顺遂】：赶路大幅推进！路程进度达到${progress}%。Roll=${roll}，请描写沿途发现捷径或顺风顺水的旅途场景。同伴可以聊聊天、讨论前方的计划。`;
   }
-  return `【系统指令 - 旅途推进】：赶路稳步前进，路程进度达到${progress}%。Roll=${roll}，请描写沿途的风景、路况或小插曲。`;
+  return `【系统指令 - 旅途推进】：赶路稳步前进，路程进度达到${progress}%。Roll=${roll}，请描写沿途的风景、路况或小插曲。同伴之间可以边走边聊。`;
 }
 
 // ─── Death Hook ─────────────────────────────────────────────────
@@ -233,9 +236,30 @@ export class D20Resolver {
     const isNodeFullyExplored = nodeProgress >= 100 && !state.currentHouseId;
 
     if (isInSafeZone) {
-      // 在安全区域：只允许 idle 和 move，不触发 explore/combat
+      // 在安全区域：允许 idle、move 和 explore
       if (action === 'move') {
-        // 允许移动
+        // 允许移动，落入下方 tension-specific 逻辑
+      } else if (action === 'explore') {
+        // BUG1b: 允许在 Tension 0 安全区下执行 explore，使用纯探索无伤配置表 [0, 0.7, 0.3]
+        const safeExploreProbs: [number, number, number] = [0, 0.7, 0.3];
+        const tier = rollToTier(safeExploreProbs, roll);
+        const progressKey = state.currentHouseId
+          ? `house_${state.currentHouseId}`
+          : `node_${state.currentNodeId}`;
+        // BUG3: 进度熔断锁 - 安全区内也生效
+        if ((state.progressMap[progressKey] || 0) >= 100) {
+          res.isSuccess = true;
+          res.newTensionLevel = 0;
+          res.narrativeInstruction = '【系统指令】：玩家试图继续探索，但此区域物资和线索已被彻底搜刮殆尽。请告诉玩家这里已经空了，建议前往其他地方。';
+          return applyDeathHook(res);
+        }
+        const progressGain = tier === 2 ? 40 : 15;
+        res.newProgressMap[progressKey] = Math.min(100, (res.newProgressMap[progressKey] || 0) + progressGain);
+        res.newTensionLevel = 0;
+        res.newHp = Math.min(100, state.hp + 5);
+        res.isSuccess = true;
+        res.narrativeInstruction = `【系统指令】：安全区域内的平稳探索。进度+${progressGain}（当前${res.newProgressMap[progressKey]}%）。Roll=${roll}，请描写安全搜刮、平稳推进的场面，不会有任何危险。`;
+        return applyMilestoneHook(applyDeathHook(res), state);
       } else {
         // 强制 tension 0，纯聊天/休整
         res.newTensionLevel = 0;
@@ -260,6 +284,7 @@ export class D20Resolver {
             fromNodeId: state.currentNodeId!,
             toNodeId: targetId,
             pathProgress: 0,
+            lockedTheme: null,
           };
           res.newHouseId = null;
           res.newTensionLevel = 1;
@@ -280,6 +305,18 @@ export class D20Resolver {
     }
 
     // ─── Tension 1 ─────
+    // BUG3: 探索进度熔断锁 - 在所有 tension 级别下拦截已探索完毕区域
+    if (action === 'explore') {
+      const cbProgressKey = state.currentHouseId
+        ? `house_${state.currentHouseId}`
+        : `node_${state.currentNodeId}`;
+      if ((state.progressMap[cbProgressKey] || 0) >= 100) {
+        res.isSuccess = true;
+        res.narrativeInstruction = '【系统指令】：玩家试图继续探索，但此区域物资和线索已被彻底搜刮殆尽。请告诉玩家这里已经空了，建议前往其他地方。';
+        return res;
+      }
+    }
+
     if (tension === 1) {
       if (action === 'explore') {
         const route = routeTable['explore'];
@@ -303,6 +340,7 @@ export class D20Resolver {
             fromNodeId: state.currentNodeId!,
             toNodeId: targetId,
             pathProgress: 0,
+            lockedTheme: null,
           };
           res.newHouseId = null;
           res.isSuccess = true;
@@ -410,6 +448,7 @@ export class D20Resolver {
               fromNodeId: state.currentNodeId!,
               toNodeId: nextNodeId!,
               pathProgress: 50, // 极限逃生已走一半
+              lockedTheme: null,
             };
             res.newHouseId = nextHouseId;
           }
@@ -462,12 +501,28 @@ export class D20Resolver {
     const fromName = fromNode?.name || transit.fromNodeId;
     const toName = toNode?.name || transit.toNodeId;
 
-    // 旅途中使用 T1 explore 的配置来结算
-    const route = TENSION_ROUTE[Math.min(tension, 1)]['explore'] || TENSION_ROUTE[1]['explore'];
-    const tier = rollToTier(route.probabilities, roll);
+    // 旅途概率根据紧张度分级：
+    // tension 0-1（和平赶路）：失败率低，以推进为主
+    // tension 2+（危险赶路）：沿用 T1 explore 配置
+    const transitProbs: [number, number, number] = tension >= 2
+      ? (TENSION_ROUTE[1]['explore']?.probabilities ?? [0.15, 0.65, 0.20])
+      : [0.08, 0.72, 0.20]; // 和平赶路：仅 8% 受阻
+    const tier = rollToTier(transitProbs, roll);
 
-    res.newHp = Math.max(0, Math.min(100, state.hp + route.hpDelta[tier]));
-    res.newTensionLevel = clampTension(tension + route.tensionDelta[tier]);
+    // HP 变化：和平赶路不扣血，危险赶路 tier=0 扣少量
+    if (tension >= 2 && tier === 0) {
+      res.newHp = Math.max(0, state.hp - 5);
+    }
+
+    // 紧张度变化：和平赶路（tension <= 1）绝不升级到 2+
+    if (tension >= 2) {
+      // 高紧张赶路：失败升级，成功降级
+      const tensionDelta = tier === 0 ? 1 : (tier === 2 ? -1 : 0);
+      res.newTensionLevel = clampTension(tension + tensionDelta);
+    } else {
+      // 和平赶路：紧张度锁定在 0-1，不会升到 2
+      res.newTensionLevel = tension as 0 | 1 | 2 | 3 | 4;
+    }
 
     // 路程推进
     const progressGain = tier === 0 ? 0 : (tier === 1 ? 25 : 50);
@@ -480,6 +535,12 @@ export class D20Resolver {
       res.newTransitState = null;
       res.newNodeId = transit.toNodeId;
       res.newHouseId = null;
+      // BUG1a: 抵达后立即检查目的地安全级别，即时结算紧张度
+      if (toNode?.safetyLevel === 'safe') {
+        res.newTensionLevel = 0;
+      } else {
+        res.newTensionLevel = 1;
+      }
       res.narrativeInstruction = `【系统指令 - 抵达目的地】：经过长途跋涉，终于抵达了【${toName}】！Roll=${roll}，请描写到达新地点时的所见所闻，展现该区域的独特风貌。`;
     } else {
       // 仍在路上
@@ -487,8 +548,9 @@ export class D20Resolver {
         fromNodeId: transit.fromNodeId,
         toNodeId: transit.toNodeId,
         pathProgress: newPathProgress,
+        lockedTheme: transit.lockedTheme || null,
       };
-      res.narrativeInstruction = buildTransitNarrative(tier, roll, newPathProgress, fromName, toName);
+      res.narrativeInstruction = buildTransitNarrative(tier, roll, newPathProgress, fromName, toName, tension);
     }
 
     return applyDeathHook(res);

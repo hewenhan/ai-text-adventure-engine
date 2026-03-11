@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useGame } from '../contexts/GameContext';
 import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import { generateSummary, generateTurn, generateImage, extractIntent, IMAGE_PROHIBITED_SENTINEL } from '../services/aiService';
 import { uploadImageToDrive } from '../lib/drive';
 import { D20Resolver } from '../lib/D20Resolver';
-import { useGrandNotification } from '../components/GrandNotification';
+import { useGrandNotification, type GrandNotificationData } from '../components/GrandNotification';
 import {
   SUMMARY_THRESHOLD, KEEP_RECENT_TURNS, BGM_LIST,
   type GameState, type IntentResult, type NodeData, type HouseData
@@ -87,6 +87,21 @@ export function useChatLogic() {
   const { isAuthenticated, accessToken } = useAuth();
   const { show: showNotification } = useGrandNotification();
   const [isProcessing, setIsProcessing] = useState(false);
+  const pendingNotificationsRef = useRef<Omit<GrandNotificationData, 'id'>[]>([]);
+  
+  const setPendingNotificationsRef = useCallback((notifications: Omit<GrandNotificationData, 'id'>[]) => {
+    pendingNotificationsRef.current = notifications;
+  }, []);
+
+  const flushPendingNotifications = useCallback(() => {
+    const items = pendingNotificationsRef.current;
+    if (items.length > 0) {
+      pendingNotificationsRef.current = [];
+      for (const item of items) {
+        showNotification(item);
+      }
+    }
+  }, [showNotification]);
   
   const hasInitialized = useRef(false);
 
@@ -161,6 +176,10 @@ export function useChatLogic() {
       }
       const recentConversation = recentTurns.join('\n');
 
+      // BUG2: 提取上一次意图用于求生本能法则
+      const lastModelMsg = [...state.history].reverse().find(m => m.debugState?.lastIntent);
+      const lastIntent = lastModelMsg?.debugState?.lastIntent || null;
+
       const intent = await extractIntent(
         userInput,
         state.currentNodeId!,
@@ -170,7 +189,9 @@ export function useChatLogic() {
         visibleHousesInfo,
         state.currentObjective?.description || null,
         recentConversation,
-        state.language
+        state.language,
+        state.pacingState.tensionLevel,
+        lastIntent
       );
 
       console.log("Intent:", intent);
@@ -183,6 +204,8 @@ export function useChatLogic() {
       }
 
       let directorNarrativeOverride: string | null = null;
+      let questNotification: Omit<GrandNotificationData, 'id'> | null = null;
+      let questDiscoveryNotification: Omit<GrandNotificationData, 'id'> | null = null;
       if (intent.intent === 'seek_quest') {
         if (state.currentObjective !== null) {
           // 分支 A：玩家已有目标却在瞎折腾
@@ -201,12 +224,19 @@ export function useChatLogic() {
             };
             updateState({ currentObjective: newObjective });
 
-            // 触发华丽通知
-            showNotification({
+            // 延迟到打字完成后显示
+            questNotification = {
               type: 'quest',
               title: '新任务！',
               description: newObjective.description,
-            });
+            };
+
+            // 目标地点揭盲通知（排在任务通知之后）
+            questDiscoveryNotification = {
+              type: 'discovery',
+              title: '发现新地点！',
+              description: `目标地点【${targetNode.name} · ${targetHouse.name}】已在地图上标记`,
+            };
 
             directorNarrativeOverride = `【系统强制派发任务】：玩家目前漫无目的。请伴游 NPC 立刻抛出一个极其紧急的新目标：极力劝说玩家前往【${targetNode.name}】寻找【${targetHouse.name}】(这是一个 ${targetHouse.type} 类型的建筑)。\n请你根据该建筑的类型，现场编造一个极其合理的动机（例如：NPC 截获了求救信号、或者想起那里藏有关乎性命的物资）。绝不要提玩家刚才瞎编的地点！敦促玩家看地图找路过去！`;
           }
@@ -265,22 +295,29 @@ export function useChatLogic() {
         };
       });
 
-      // ── Location Discovery Notification ──
+      // ── Location Discovery Notification (deferred) ──
+      const pendingNotifications: Omit<GrandNotificationData, 'id'>[] = [];
       // 抵达新节点
       if (!resolution.newTransitState && state.transitState && resolution.newNodeId !== state.currentNodeId) {
         const arrivedNode = state.worldData?.nodes.find(n => n.id === resolution.newNodeId);
         if (arrivedNode) {
-          showNotification({
+          pendingNotifications.push({
             type: 'discovery',
             title: '发现新地点！',
             description: `你抵达了【${arrivedNode.name}】`,
           });
         }
       }
+      // 动态记忆锁：旅途结束时将 lockedTheme 推入黑名单
+      if (!resolution.newTransitState && state.transitState?.lockedTheme) {
+        updateState(prev => ({
+          exhaustedThemes: [...prev.exhaustedThemes, state.transitState!.lockedTheme!]
+        }));
+      }
       // 任务目标地点揭盲
       if (state.currentObjective && resolution.newNodeId === state.currentObjective.targetNodeId 
           && resolution.newNodeId !== state.currentNodeId) {
-        showNotification({
+        pendingNotifications.push({
           type: 'discovery',
           title: '目标地点已揭盲！',
           description: `任务目标所在区域已进入视野`,
@@ -300,7 +337,7 @@ export function useChatLogic() {
       if (resolution.newTransitState) {
         const fromNode = findNode(state, resolution.newTransitState.fromNodeId);
         const toNode = findNode(state, resolution.newTransitState.toNodeId);
-        locationContext = `【当前位置】：荒野旅途。正在从【${fromNode?.name || resolution.newTransitState.fromNodeId}】徒步赶往【${toNode?.name || resolution.newTransitState.toNodeId}】的路上。(当前路程进度：${resolution.newTransitState.pathProgress}%)。请侧重描写沿途的风景、路况或遭遇的危险，不要提及任何具体的建筑内部。`;
+        locationContext = `【当前位置】：荒野旅途。正在从【${fromNode?.name || resolution.newTransitState.fromNodeId}】徒步赶往【${toNode?.name || resolution.newTransitState.toNodeId}】的路上。(当前路程进度：${resolution.newTransitState.pathProgress}%)。${resolution.newTensionLevel >= 2 ? '请侧重描写沿途遭遇的危险和冲突。' : '请侧重描写沿途的风景、路况、天气和同伴互动，不要凭空制造危险。'}`;
       } else {
         const updatedNode = findNode(state, resolution.newNodeId);
         if (updatedNode) {
@@ -331,6 +368,34 @@ export function useChatLogic() {
       const progressLabel = resolution.newTransitState
         ? `当前徒步赶路进度: ${currentProgress}%`
         : (resolution.newHouseId ? `当前室内搜刮进度: ${currentProgress}%` : `当前区域建筑发现进度: ${currentProgress}%`);
+
+      // ── 动态记忆锁：旅途主题指令 ──
+      let themeInstruction = '';
+      if (resolution.newTransitState) {
+        const isHighTension = resolution.newTensionLevel >= 2;
+        const objectiveHint = state.currentObjective
+          ? `同伴可以边走边聊关于目标【${state.currentObjective.description}】的背景：比如那个地方以前是什么样的、听说过什么传闻、猜测去了以后可能遇到什么情况。\n**[绝对禁止]：严禁提议具体的行动方案（如"推门进去"、"先偷看"、"杀个措手不及"等战术性台词），因为还在赶路中，离目标还远着呢！只能聊背景、回忆、猜测，不能规划到达后的具体行动。**`
+          : '同伴可以边走边聊天，讨论路上的见闻，或者回忆过去的经历。';
+
+        if (!state.transitState?.lockedTheme) {
+          // 新旅途
+          const blacklist = state.exhaustedThemes.length > 0
+            ? state.exhaustedThemes.join('、')
+            : '无';
+          if (isHighTension) {
+            themeInstruction = `\n【系统强制 - 新旅途创意指令】：玩家踏上新旅途且处于高紧张度。请自由发挥，凭空创造一个全新的旅途危机或阻碍。**[绝对禁止法则]：绝不允许出现以下已历经的遭遇：${blacklist}。** 你必须在 encounter_tag 字段中用2-4个字概括你创造的遭遇主题。`;
+          } else {
+            themeInstruction = `\n【系统指令 - 旅途氛围】：玩家正在赶路，当前是和平行军阶段（紧张度=${resolution.newTensionLevel}）。请描写旅途中的风景、路况、天气等自然环境，以及同伴之间的互动对话。${objectiveHint}\n**[绝对禁止]：不要凭空制造危机、袭击、怪物或灾难！这段路是安全的赶路阶段。** 如果需要 encounter_tag，请填写路况/风景相关的词（如：泥泞小路、晨雾弥漫、峡谷栈道）。已用过的主题请避开：${blacklist}。`;
+          }
+        } else {
+          // 延续旅途：锁定主题
+          if (isHighTension) {
+            themeInstruction = `\n[强制剧本提示：继续赶路。当前路段的核心环境/威胁已被锁定为【${state.transitState.lockedTheme}】，请务必围绕该主题连贯描写，绝不可突然切换成其他毫不相干的灾难！]`;
+          } else {
+            themeInstruction = `\n[旅途剧本提示：继续赶路。当前路段的氛围/环境已被锁定为【${state.transitState.lockedTheme}】，请围绕该主题连贯描写旅途见闻。${objectiveHint}\n**不要凭空制造危机，这是和平赶路阶段。**]`;
+          }
+        }
+      }
 
       const characterRoleString = `Name: ${state.characterSettings.name}\nGender: ${state.characterSettings.gender}\nDescription: ${state.characterSettings.description}\nPersonality: ${state.characterSettings.personality}\nBackground: ${state.characterSettings.background}\nHobbies: ${state.characterSettings.hobbies}`;
 
@@ -378,7 +443,7 @@ CORE RULES:
 5. **LANGUAGE**: 你必须用${state.language === 'zh' ? '中文' : 'English'}回复。
 
 本次检定的既定事实 (Required Outcome) - 极其重要：
-${resolution.narrativeInstruction}
+${resolution.narrativeInstruction}${themeInstruction}（不要和已有聊天记录出现同质化危机）
 
 **严格按照上述指令的走向描写，不可扭转胜负。**
 
@@ -387,7 +452,8 @@ OUTPUT FORMAT (JSON ONLY):
   "image_prompt": "A detailed, first-person view description for image generation...",
   "text_sequence": ["segment1", "segment2", ...],
   "scene_visuals_update": "仅在进入新地点时提供，否则省略",
-  "hp_description": "根据当前HP(${resolution.newHp}/100)用一句简短的话描述角色当前的身体健康状况（如：'精神饱满，毫发无伤'、'左臂渗血，脸色苍白'等）"
+  "hp_description": "根据当前HP(${resolution.newHp}/100)用一句简短的话描述角色当前的身体健康状况（如：'精神饱满，毫发无伤'、'左臂渗血，脸色苍白'等）",
+  "encounter_tag": "用2-4个字概括当前生成的遭遇主题(如：失控卡车、暴雨泥石流、流浪恶犬)。仅在旅途/危机场景中提供，安全区可省略"
 }
 
 不需要返回任何状态数值 update（全部数据状态已在系统后台静默变更完毕）。`;
@@ -399,8 +465,20 @@ OUTPUT FORMAT (JSON ONLY):
       // ── Call LLM for story rendering ──
       const responseJson = await generateTurn(fullPrompt);
       // console.log("AI Response JSON:", responseJson);
-      const { image_prompt, text_sequence, scene_visuals_update, hp_description } = responseJson;
+      const { image_prompt, text_sequence, scene_visuals_update, hp_description, encounter_tag } = responseJson;
       
+      // ── 动态记忆锁：处理 encounter_tag ──
+      if (encounter_tag && resolution.newTransitState) {
+        updateState(prev => {
+          if (prev.transitState && !prev.transitState.lockedTheme) {
+            return {
+              transitState: { ...prev.transitState, lockedTheme: encounter_tag }
+            };
+          }
+          return {};
+        });
+      }
+
       // 存储 AI 生成的健康状况描述
       if (hp_description) {
         updateState({ hpDescription: hp_description });
@@ -469,12 +547,18 @@ OUTPUT FORMAT (JSON ONLY):
         })();
       }
 
-      // ── Display messages with typing delays ──
-      const WORDS_PER_SECOND = 6;
-      const calculateDelay = (text: string) => {
-        const delay = (text.length / WORDS_PER_SECOND) * 1000;
-        return Math.max(1000, delay);
-      };
+      // ── Display messages with reading-speed delays ──
+      // 每秒 7 个字的阅读速度来计算每条消息的动画 / 等待时长
+      const CHARS_PER_SECOND = 7;
+      const calcDelay = (text: string) => Math.max(800, (text.length / CHARS_PER_SECOND) * 1000);
+      // 合并所有待显示通知（quest + discovery）
+      if (questNotification) {
+        pendingNotifications.unshift(questNotification);
+        // 目标地点揭盲通知紧跟任务通知之后
+        if (questDiscoveryNotification) {
+          pendingNotifications.splice(1, 0, questDiscoveryNotification);
+        }
+      }
 
       const displayMessages = async () => {
         let lastMsgId = uuidv4();
@@ -499,12 +583,13 @@ OUTPUT FORMAT (JSON ONLY):
             }));
           }
           setIsProcessing(false);
+          // 最后一条消息打字完成后显示通知（由 Chat.tsx 的 onTypewriterComplete 触发）
+          setPendingNotificationsRef(pendingNotifications);
           return;
         }
 
         for (let i = 1; i < messages.length - 1; i++) {
-          const delay = calculateDelay(messages[i - 1]);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise(resolve => setTimeout(resolve, calcDelay(messages[i - 1])));
           
           lastMsgId = uuidv4();
           addMessage({
@@ -516,10 +601,9 @@ OUTPUT FORMAT (JSON ONLY):
           });
         }
 
-        const lastDelay = calculateDelay(messages[messages.length - 2]);
         const [fileName] = await Promise.all([
           imagePromise,
-          new Promise(resolve => setTimeout(resolve, lastDelay))
+          new Promise(resolve => setTimeout(resolve, calcDelay(messages[messages.length - 2])))
         ]);
 
         lastMsgId = uuidv4();
@@ -533,6 +617,8 @@ OUTPUT FORMAT (JSON ONLY):
         });
 
         setIsProcessing(false);
+        // 最后一条消息打字完成后显示通知
+        setPendingNotificationsRef(pendingNotifications);
       };
 
       displayMessages();
@@ -552,6 +638,7 @@ OUTPUT FORMAT (JSON ONLY):
 
   return {
     isProcessing,
-    handleTurn
+    handleTurn,
+    flushPendingNotifications
   };
 }

@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+/* 打字光标：总是出现在最后一个块级元素的末尾 */
+.typewriter-cursor > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background-color: #a1a1aa; /* zinc-400 */
+  margin-left: 2px;
+  vertical-align: middle;
+  animation: cursor-blink 1s steps(2) infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
