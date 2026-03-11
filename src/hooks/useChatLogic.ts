@@ -397,7 +397,7 @@ export function useChatLogic() {
         }
       }
 
-      const characterRoleString = `Name: ${state.characterSettings.name}\nGender: ${state.characterSettings.gender}\nDescription: ${state.characterSettings.description}\nPersonality: ${state.characterSettings.personality}\nBackground: ${state.characterSettings.background}\nHobbies: ${state.characterSettings.hobbies}`;
+      const characterRoleString = `Name: ${state.characterSettings.name}\nGender: ${state.characterSettings.gender}\nDescription: ${state.characterSettings.description}\nPersonality: ${state.characterSettings.personality}\nBackground: ${state.characterSettings.background}\nSpecialties: ${state.characterSettings.specialties}\nHobbies: ${state.characterSettings.hobbies}\nDislikes: ${state.characterSettings.dislikes}`;
 
       // ── Module 5: Assemble LLM Prompt (Story Renderer Only) ──
       const systemPrompt = `你是本游戏的沉浸式多模态图文渲染引擎。你**没有**判定胜负的权力，只需根据以下【既定事实】进行生动描写。
@@ -527,9 +527,22 @@ OUTPUT FORMAT (JSON ONLY):
           ? `${image_prompt}\n\nIMPORTANT - The companion character in this scene has the following fixed appearance: ${characterAppearance}`
           : image_prompt;
 
+        // 构建物理特征锁定字符串（包含发型发色）
+        const aiSetup = state.aiCharacterSetup;
+        const physicalTraitsLock = aiSetup
+          ? [
+              aiSetup.skinColor && `Skin: ${aiSetup.skinColor}`,
+              aiSetup.height && `Height: ${aiSetup.height}`,
+              aiSetup.weight && `Build: ${aiSetup.weight}`,
+              aiSetup.age && `Age: ${aiSetup.age}`,
+              aiSetup.hairStyle && `Hair Style: ${aiSetup.hairStyle}`,
+              aiSetup.hairColor && `Hair Color: ${aiSetup.hairColor}`,
+            ].filter(Boolean).join(', ') || undefined
+          : undefined;
+
         imagePromise = (async () => {
           try {
-            const base64Data = await generateImage(enrichedImagePrompt, state.artStylePrompt || undefined);
+            const base64Data = await generateImage(enrichedImagePrompt, state.artStylePrompt || undefined, physicalTraitsLock);
             if (base64Data === IMAGE_PROHIBITED_SENTINEL) {
               newDebugState.lastImageError = 'PROHIBITED_CONTENT';
               return IMAGE_PROHIBITED_SENTINEL;

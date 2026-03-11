@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useGame } from '../contexts/GameContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertCircle, Backpack, Loader2, Map, RefreshCw, Save } from 'lucide-react';
+import { AlertCircle, Backpack, Home, Loader2, Map, RefreshCw, Save } from 'lucide-react';
 import { PlayerProfile, DEFAULT_LOADING_MESSAGES, INITIAL_STATE } from '../types/game';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { ChatMessageItem } from '../components/ChatMessageItem';
@@ -20,11 +21,12 @@ import { DriveToast } from '../components/DriveToast';
 import { FakeProgressBar, FakeProgressBarHandle } from '../components/FakeProgressBar';
 import { FloatingObjective } from '../components/FloatingObjective';
 import { uploadImageToDrive, getImageUrlByName } from '../lib/drive';
-import { fleshOutCharacterProfile, fetchCustomLoadingMessages, generateWorldData, generateMapImage, generateCharacterPortrait } from '../services/aiService';
+import { fleshOutCharacterProfile, fleshOutPlayerProfile, fetchCustomLoadingMessages, generateWorldData, generateMapImage, generateCharacterPortrait } from '../services/aiService';
 
 export default function Chat() {
   const { state, updateState, exportSave } = useGame();
   const { isAuthenticated, driveError, reconnectDrive, accessToken } = useAuth();
+  const navigate = useNavigate();
   const [showStatus, setShowStatus] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [textSpeed, setTextSpeed] = useState<TextSpeed>('normal');
@@ -109,13 +111,21 @@ export default function Chat() {
             state.characterSettings.name,
             state.characterSettings.gender,
             state.characterSettings.description,
-            state.language
+            state.language,
+            state.aiCharacterSetup
           );
           
           updateState({ 
             characterSettings: {
               ...profile,
               isFleshedOut: true
+            },
+            // 回写 AI 生成的发型发色和可能补全的姓名到 aiCharacterSetup
+            aiCharacterSetup: {
+              ...(state.aiCharacterSetup || { name: '', age: '', gender: '', orientation: '', skinColor: '', height: '', weight: '', personalityDesc: '', specialties: '', hobbies: '', dislikes: '', hairStyle: '', hairColor: '' }),
+              name: profile.name || state.aiCharacterSetup?.name || '',
+              hairStyle: profile.hairStyle || state.aiCharacterSetup?.hairStyle || '',
+              hairColor: profile.hairColor || state.aiCharacterSetup?.hairColor || '',
             }
           });
 
@@ -150,6 +160,30 @@ export default function Chat() {
 
     fleshOutCharacter();
   }, [state.characterSettings, state.worldview]);
+
+  // Player Profile Flesh-out: fill missing fields (name, hair, personality)
+  useEffect(() => {
+    const fleshOutPlayer = async () => {
+      if (state.playerProfile && !state.playerProfile.hairStyle && state.worldview) {
+        try {
+          const filled = await fleshOutPlayerProfile(state.worldview, state.playerProfile, state.language);
+          updateState({
+            playerProfile: {
+              ...state.playerProfile,
+              name: state.playerProfile.name || filled.name || state.playerProfile.name,
+              age: state.playerProfile.age || filled.age || state.playerProfile.age,
+              personalityDesc: state.playerProfile.personalityDesc || filled.personalityDesc || '',
+              hairStyle: filled.hairStyle || '',
+              hairColor: filled.hairColor || '',
+            }
+          });
+        } catch (e) {
+          console.error("Failed to flesh out player profile", e);
+        }
+      }
+    };
+    fleshOutPlayer();
+  }, [state.playerProfile?.hairStyle, state.worldview]);
 
   // World Data Generation: generate topology map if not present
   const [isGeneratingWorld, setIsGeneratingWorld] = useState(false);
@@ -239,8 +273,15 @@ export default function Chat() {
     updateState({
       playerProfile: {
         name: tempName,
+        age: '',
         gender: tempGender,
-        orientation: tempOrientation
+        orientation: tempOrientation,
+        skinColor: '',
+        height: '',
+        weight: '',
+        personalityDesc: '',
+        hairStyle: '',
+        hairColor: '',
       }
     });
     setShowProfileModal(false);
@@ -379,6 +420,13 @@ export default function Chat() {
               <span>未连接 Drive</span>
             </div>
           )}
+          <button
+            onClick={() => navigate('/')}
+            title="返回首页"
+            className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors"
+          >
+            <Home className="w-4 h-4 text-zinc-400" />
+          </button>
           <button 
             onClick={handleExportSave}
             title="保存存档 (Ctrl+S)"

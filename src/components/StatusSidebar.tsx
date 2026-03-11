@@ -32,13 +32,13 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm z-20"
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm z-30"
       />
       <motion.div 
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
         exit={{ x: '100%' }}
-        className="absolute right-0 top-0 bottom-0 w-80 bg-zinc-900 border-l border-zinc-800 z-30 p-6 overflow-y-auto"
+        className="absolute right-0 top-0 bottom-0 w-80 bg-zinc-900 border-l border-zinc-800 z-40 p-6 overflow-y-auto"
       >
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold">状态</h2>
@@ -206,9 +206,33 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
               <div><span className="text-zinc-500">简述：</span>{state.characterSettings.description}</div>
               {state.characterSettings.personality && <div><span className="text-zinc-500">性格：</span>{state.characterSettings.personality}</div>}
               {state.characterSettings.background && <div><span className="text-zinc-500">经历：</span>{state.characterSettings.background}</div>}
-              {state.characterSettings.hobbies && <div><span className="text-zinc-500">特长/爱好：</span>{state.characterSettings.hobbies}</div>}
+              {state.characterSettings.specialties && <div><span className="text-zinc-500">特长：</span>{state.characterSettings.specialties}</div>}
+              {state.characterSettings.hobbies && <div><span className="text-zinc-500">爱好：</span>{state.characterSettings.hobbies}</div>}
+              {state.characterSettings.dislikes && <div><span className="text-zinc-500">厌恶：</span>{state.characterSettings.dislikes}</div>}
             </div>
           </div>
+
+          {/* Player Profile */}
+          {state.playerProfile && (
+            <div>
+              <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">玩家档案</h3>
+              <div className="bg-zinc-950 border border-zinc-800 p-3 rounded-lg text-sm text-zinc-300 space-y-1">
+                {state.playerProfile.name && <div><span className="text-zinc-500">姓名：</span>{state.playerProfile.name}</div>}
+                <div><span className="text-zinc-500">性别：</span>{
+                  state.playerProfile.gender === 'Male' ? '男' :
+                  state.playerProfile.gender === 'Female' ? '女' :
+                  state.playerProfile.gender === 'Non-binary' ? '非二元' : '其他'
+                }</div>
+                {state.playerProfile.age && <div><span className="text-zinc-500">年龄：</span>{state.playerProfile.age}</div>}
+                {state.playerProfile.skinColor && <div><span className="text-zinc-500">肤色：</span>{state.playerProfile.skinColor}</div>}
+                {state.playerProfile.height && <div><span className="text-zinc-500">身高：</span>{state.playerProfile.height}</div>}
+                {state.playerProfile.weight && <div><span className="text-zinc-500">体型：</span>{state.playerProfile.weight}</div>}
+                {state.playerProfile.hairStyle && <div><span className="text-zinc-500">发型：</span>{state.playerProfile.hairStyle}</div>}
+                {state.playerProfile.hairColor && <div><span className="text-zinc-500">发色：</span>{state.playerProfile.hairColor}</div>}
+                {state.playerProfile.personalityDesc && <div><span className="text-zinc-500">性格：</span>{state.playerProfile.personalityDesc}</div>}
+              </div>
+            </div>
+          )}
         </div>
       </motion.div>
     </>

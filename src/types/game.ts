@@ -71,15 +71,42 @@ export interface CharacterProfile {
   description: string;
   personality: string;
   background: string;
+  specialties: string;
   hobbies: string;
+  dislikes: string;
   appearancePrompt: string;
   isFleshedOut: boolean;
+  hairStyle?: string;
+  hairColor?: string;
 }
 
 export interface PlayerProfile {
   name: string;
+  age: string;
   gender: 'Male' | 'Female' | 'Non-binary' | 'Other';
   orientation: 'Heterosexual' | 'Homosexual' | 'Bisexual' | 'Pansexual' | 'Asexual' | 'Other';
+  skinColor: string;
+  height: string;
+  weight: string;
+  personalityDesc: string;
+  hairStyle: string;
+  hairColor: string;
+}
+
+export interface AICharacterSetup {
+  name: string;
+  age: string;
+  gender: string;
+  orientation: string;
+  skinColor: string;
+  height: string;
+  weight: string;
+  personalityDesc: string;
+  specialties: string;
+  hobbies: string;
+  dislikes: string;
+  hairStyle: string;
+  hairColor: string;
 }
 
 // --- Core Game State ---
@@ -94,6 +121,7 @@ export interface GameState {
   summary: string;
   turnsSinceLastSummary: number;
   playerProfile?: PlayerProfile;
+  aiCharacterSetup?: AICharacterSetup;
   loadingMessages: string[];
   language: 'zh' | 'en';
 
@@ -172,7 +200,9 @@ export const DEFAULT_CHARACTER: CharacterProfile = {
   description: "23岁白羊座的小女生",
   personality: "",
   background: "",
+  specialties: "",
   hobbies: "",
+  dislikes: "",
   appearancePrompt: "",
   isFleshedOut: false
 };

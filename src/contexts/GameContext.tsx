@@ -49,6 +49,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         summary: parsed.summary ?? INITIAL_STATE.summary,
         turnsSinceLastSummary: parsed.turnsSinceLastSummary ?? INITIAL_STATE.turnsSinceLastSummary,
         playerProfile: parsed.playerProfile,
+        aiCharacterSetup: parsed.aiCharacterSetup,
         loadingMessages: parsed.loadingMessages || DEFAULT_LOADING_MESSAGES,
         language: parsed.language || INITIAL_STATE.language,
         

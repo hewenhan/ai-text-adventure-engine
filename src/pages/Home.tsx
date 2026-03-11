@@ -3,23 +3,13 @@ import { useGame } from '../contexts/GameContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Upload, Play, Settings, Globe, Plus, History } from 'lucide-react';
+import { Upload, Globe, Plus, History, Sparkles, Dice5, ImageIcon, BookOpen } from 'lucide-react';
 import { APP_DESCRIPTION, APP_SUBTITLE, APP_TITLE } from '../lib/appMeta';
 
 export default function Home() {
   const { state, updateState, loadSave, resetGame } = useGame();
   const { isAuthenticated, login, refreshSession } = useAuth();
   const navigate = useNavigate();
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [tempName, setTempName] = useState(() => {
-    return state.characterSettings.name || '';
-  });
-  const [tempGender, setTempGender] = useState(() => {
-    return state.characterSettings.gender || '女';
-  });
-  const [tempSettings, setTempSettings] = useState(() => {
-    return state.characterSettings.description || '';
-  });
   const [tempLanguage, setTempLanguage] = useState<'zh' | 'en'>(() => {
     return state.language || 'zh';
   });
@@ -90,16 +80,6 @@ export default function Home() {
     }
     resetGame();
     updateState({ 
-      characterSettings: {
-        name: tempName,
-        gender: tempGender,
-        description: tempSettings,
-        personality: '',
-        background: '',
-        hobbies: '',
-        appearancePrompt: '',
-        isFleshedOut: false
-      }, 
       language: tempLanguage,
       isFirstRun: true 
     });
@@ -119,6 +99,24 @@ export default function Home() {
           </h1>
           <p className="text-zinc-300 text-base font-medium leading-relaxed">{APP_SUBTITLE}</p>
           <p className="text-zinc-500 text-sm leading-6 max-w-md mx-auto">{APP_DESCRIPTION}</p>
+        </div>
+
+        {/* Feature highlights */}
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { icon: Sparkles, label: '沉浸式对话', desc: '和 AI 搭档自由互动' },
+            { icon: Dice5, label: '命运骰子', desc: '每次行动都有惊喜' },
+            { icon: ImageIcon, label: '实时插画', desc: '场景自动生成画面' },
+            { icon: BookOpen, label: '自由世界', desc: '你来定义故事舞台' },
+          ].map((f) => (
+            <div key={f.label} className="flex items-start gap-2.5 p-3 bg-zinc-900/40 border border-zinc-800/60 rounded-xl">
+              <f.icon className="w-4 h-4 text-zinc-400 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs font-medium text-zinc-300">{f.label}</p>
+                <p className="text-[11px] text-zinc-500">{f.desc}</p>
+              </div>
+            </div>
+          ))}
         </div>
 
         <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl space-y-6 backdrop-blur-sm">
@@ -152,80 +150,26 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Character Settings */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-zinc-400 flex items-center gap-2">
-                <Settings className="w-4 h-4" /> 角色设定
-              </label>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-xs text-zinc-500">姓名</label>
-                <input
-                  type="text"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-white/20 outline-none"
-                  placeholder="例如：林星"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-zinc-500">语言</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { value: 'zh', label: '中文' },
-                    { value: 'en', label: 'English' }
-                  ].map((l) => (
-                    <button
-                      key={l.value}
-                      onClick={() => setTempLanguage(l.value as 'zh' | 'en')}
-                      className={`p-2 rounded-xl text-xs border transition-colors ${
-                        tempLanguage === l.value 
-                          ? 'bg-white text-black border-white' 
-                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-900'
-                      }`}
-                    >
-                      {l.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs text-zinc-500">性别</label>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { value: '男', label: '男' },
-                  { value: '女', label: '女' },
-                  { value: '非二元', label: '非二元' },
-                  { value: '保密', label: '保密' }
-                ].map((g) => (
-                  <button
-                    key={g.value}
-                    onClick={() => setTempGender(g.value)}
-                    className={`p-2 rounded-xl text-xs border transition-colors ${
-                      tempGender === g.value 
-                        ? 'bg-white text-black border-white' 
-                        : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-900'
-                    }`}
-                  >
-                    {g.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs text-zinc-500">简述</label>
-              <textarea
-                value={tempSettings}
-                onChange={(e) => setTempSettings(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-white/20 outline-none resize-none h-24"
-                placeholder="描述 AI 角色的大致设定..."
-              />
+          {/* Language */}
+          <div className="space-y-1">
+            <label className="text-xs text-zinc-500">AI 回复语言</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'zh', label: '中文' },
+                { value: 'en', label: 'English' }
+              ].map((l) => (
+                <button
+                  key={l.value}
+                  onClick={() => setTempLanguage(l.value as 'zh' | 'en')}
+                  className={`p-2 rounded-xl text-xs border transition-colors ${
+                    tempLanguage === l.value 
+                      ? 'bg-white text-black border-white' 
+                      : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-900'
+                  }`}
+                >
+                  {l.label}
+                </button>
+              ))}
             </div>
           </div>
 

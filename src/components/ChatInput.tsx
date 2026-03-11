@@ -1,5 +1,5 @@
 import { Send, Volume2, VolumeX, Volume1, ChevronsRight } from 'lucide-react';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import type { TextSpeed } from './TypewriterMessage';
 
 interface ChatInputProps {
@@ -100,9 +100,19 @@ export function ChatInput({ isProcessing, onSend, volume, onVolumeChange, textSp
 
   const speedLabel = textSpeed === 'normal' ? '1x' : textSpeed === 'fast' ? '2x' : '∞';
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea height
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`; // max ~6 lines
+  }, [input]);
+
   return (
     <div className="p-4 bg-zinc-900/50 backdrop-blur-md border-t border-zinc-800">
-      <div className="max-w-3xl mx-auto relative flex items-center gap-2">
+      <div className="max-w-3xl mx-auto relative flex items-end gap-2">
         {/* Volume control */}
         <div
           ref={volumeRef}
@@ -184,18 +194,21 @@ export function ChatInput({ isProcessing, onSend, volume, onVolumeChange, textSp
 
         {/* Text input */}
         <div className="relative flex-1">
-          <input
-            type="text"
+          <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={async (e) => {
-              if (e.key === 'Enter' && !isProcessing && input.trim()) {
+              if (e.key === 'Enter' && !e.shiftKey && !isProcessing && input.trim()) {
+                e.preventDefault();
                 await handleSend();
               }
             }}
             placeholder={isProcessing ? "等待回复..." : "你要做什么？"}
             disabled={isProcessing}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-full py-3 pl-5 pr-12 focus:ring-2 focus:ring-white/20 outline-none disabled:opacity-50"
+            rows={1}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-5 pr-12 focus:ring-2 focus:ring-white/20 outline-none disabled:opacity-50 resize-none overflow-y-hidden leading-normal"
+            style={{ overflowY: input && textareaRef.current && textareaRef.current.scrollHeight > 160 ? 'auto' : 'hidden' }}
           />
           <button 
             onClick={handleSend}
