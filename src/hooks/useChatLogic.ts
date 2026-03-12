@@ -180,6 +180,17 @@ export function useChatLogic() {
       const lastModelMsg = [...state.history].reverse().find(m => m.debugState?.lastIntent);
       const lastIntent = lastModelMsg?.debugState?.lastIntent || null;
 
+      // 组装旅途信息供意图判断使用
+      const transitInfo = state.transitState ? (() => {
+        const fromNode = state.worldData!.nodes.find(n => n.id === state.transitState!.fromNodeId);
+        const toNode = state.worldData!.nodes.find(n => n.id === state.transitState!.toNodeId);
+        return {
+          fromName: fromNode?.name || state.transitState!.fromNodeId,
+          toName: toNode?.name || state.transitState!.toNodeId,
+          progress: state.transitState!.pathProgress,
+        };
+      })() : null;
+
       const intent = await extractIntent(
         userInput,
         state.currentNodeId!,
@@ -191,7 +202,8 @@ export function useChatLogic() {
         recentConversation,
         state.language,
         state.pacingState.tensionLevel,
-        lastIntent
+        lastIntent,
+        transitInfo
       );
 
       console.log("Intent:", intent);
@@ -247,13 +259,34 @@ export function useChatLogic() {
         state.pacingState.tensionLevel = 1; // Force escalate to Tension 1 if trying to explore in safe zone  
       }
 
+      // ── Step 1.8: 赶路中掉头处理（由意图 AI 判定 direction） ──
+      let resolveState = state;
+      const isRetreatIntent = state.transitState && intent.direction === 'back';
+      if (isRetreatIntent) {
+        const reversed = {
+          fromNodeId: state.transitState!.toNodeId,
+          toNodeId: state.transitState!.fromNodeId,
+          pathProgress: Math.max(0, 100 - state.transitState!.pathProgress),
+          lockedTheme: null, // 掉头清除旅途主题，返程是新旅途
+        };
+        resolveState = { ...state, transitState: reversed };
+        console.log('Transit RETREAT: reversed', state.transitState, '->', reversed);
+      }
+
       // ── Step 2: D20 State Machine Resolution ──
       const d20 = Math.floor(Math.random() * 20) + 1;
-      const resolution = D20Resolver.resolve(state, intent, d20);
+      const resolution = D20Resolver.resolve(resolveState, intent, d20);
 
       // 如果导演系统有叙事覆盖，替换 resolution 的 narrativeInstruction
       if (directorNarrativeOverride) {
         resolution.narrativeInstruction = directorNarrativeOverride;
+      }
+
+      // ── 掉头返程叙事注入 ──
+      if (isRetreatIntent && state.transitState) {
+        const origFromNode = state.worldData?.nodes.find(n => n.id === state.transitState!.fromNodeId);
+        const returnToName = origFromNode?.name || state.transitState.fromNodeId || '来时的方向';
+        resolution.narrativeInstruction = `【系统强制 - 掉头返程】：玩家决定中途折返，掉头返回【${returnToName}】方向！路程进度已反转（当前返程进度${resolution.newTransitState?.pathProgress ?? 0}%）。请尊重玩家的返程决定，描写掉头折返的过程。\n` + resolution.narrativeInstruction;
       }
 
       // ── 好感度检定叙事注入 ──

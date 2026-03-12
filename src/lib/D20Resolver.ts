@@ -145,10 +145,33 @@ function buildT4Narrative(action: string, tier: number, roll: number, hpAfter: n
   return `【系统指令 - 致命疏忽】：在死斗中发呆！被首领重击，HP-50（当前${hpAfter}）。Roll=${roll}，请描写因为分神而遭受猛击。`;
 }
 
-function buildTransitNarrative(tier: number, roll: number, progress: number, fromName: string, toName: string, tension: number): string {
+function buildTransitNarrative(tier: number, roll: number, progress: number, fromName: string, toName: string, tension: number, hpAfter?: number): string {
+  // ─── T4 死斗追击 ───
+  if (tension >= 4) {
+    if (tier === 0) {
+      return `【系统指令 - 死斗追击】：在逃往【${toName}】的途中被死斗级敌人拦截围堵！无法前进，遭受重创，HP-25（当前${hpAfter}）。Roll=${roll}，请描写被强敌围堵、无路可逃的绝望场面。`;
+    }
+    if (tier === 2) {
+      return `【系统指令 - 绝地逃生】：在千钧一发之际突破了追杀者的封锁！路程进度飞跃至${progress}%，紧张度骤降。Roll=${roll}，请描写奇迹般的绝境逃脱。`;
+    }
+    return `【系统指令 - 强行突围】：在追杀者的夹击中勉强向【${toName}】推进，路程进度${progress}%。死斗仍在继续。Roll=${roll}，请描写背水一战、边打边撤的惨烈场面。`;
+  }
+
+  // ─── T3 精英追击 ───
+  if (tension >= 3) {
+    if (tier === 0) {
+      return `【系统指令 - 追击重创】：在赶往【${toName}】的路上遭到精英敌人猛攻！路程无进展，HP-15（当前${hpAfter}），紧张度进一步升级。Roll=${roll}，请描写被精英追击、身负重伤的危急场面。`;
+    }
+    if (tier === 2) {
+      return `【系统指令 - 甩开追兵】：巧妙地甩开了追击者！路程大幅推进至${progress}%，紧张度下降。Roll=${roll}，请描写利用地形或智谋摆脱追击的精彩场面。`;
+    }
+    return `【系统指令 - 且战且退】：在精英追击的压力下艰难向【${toName}】推进，路程进度${progress}%。危机未解除。Roll=${roll}，请描写边抵抗边赶路的紧张场面。`;
+  }
+
+  // ─── T2 冲突赶路 ───
   if (tier === 0) {
     if (tension >= 2) {
-      return `【系统指令 - 旅途遇袭】：在从【${fromName}】前往【${toName}】的旅途中遭遇危险袭击！路程无进展，紧张度上升。Roll=${roll}，请描写旅途中突发的激烈危险遭遇。`;
+      return `【系统指令 - 旅途遇袭】：在从【${fromName}】前往【${toName}】的旅途中遭遇危险袭击！路程无进展，HP-5（当前${hpAfter}），紧张度上升。Roll=${roll}，请描写旅途中突发的激烈危险遭遇。`;
     }
     return `【系统指令 - 旅途受阻】：在从【${fromName}】前往【${toName}】的路上碰到了麻烦，耽搁了一阵。路程无进展。Roll=${roll}，请描写路况糟糕、需要绕路、天气突变等小阻碍（不要描写战斗或严重危险）。`;
   }
@@ -446,7 +469,51 @@ export class D20Resolver {
 
     // ─── Tension 2 ─────
     if (tension === 2) {
-      const routeKey = (action === 'idle' || action === 'suicidal_idle') ? action : (action === 'move' ? 'move' : 'combat');
+      if (action === 'move') {
+        // T2 撤退逃亡检定：过 D20 后执行实际位置变更
+        const route = routeTable['move'];
+        const tier = rollToTier(route.probabilities, roll, res);
+        res.newHp = Math.max(0, Math.min(100, state.hp + route.hpDelta[tier]));
+        res.newTensionLevel = clampTension(tension + route.tensionDelta[tier]);
+        res.isSuccess = true;
+
+        const targetId = intent.targetId;
+        if (targetId && currentNode?.connections.includes(targetId)) {
+          // 跨节点撤退 → 创建 transit
+          const targetNode = findNode(state, targetId);
+          const targetName = targetNode?.name || targetId;
+          res.newTransitState = {
+            fromNodeId: state.currentNodeId!,
+            toNodeId: targetId,
+            pathProgress: 5, // 战术撤退已走一半
+            lockedTheme: null,
+          };
+          res.newHouseId = null;
+          res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家朝【${targetName}】方向有序撤出！紧张度降回 1 级。Roll=${roll}，请描写安全撤离危机区域并踏上旅途的过程。`;
+        } else if (targetId && currentNode) {
+          const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
+          const targetHouse = visibleHouses.find(h => h.id === targetId);
+          if (targetHouse) {
+            if (state.currentHouseId && state.currentHouseId !== targetId) {
+              res.newHouseId = null;
+              res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲出当前建筑来到街区！紧张度降回 1 级。Roll=${roll}，请描写逃出建筑的过程。`;
+            } else {
+              res.newHouseId = targetId;
+              res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲入【${targetHouse.name}】躲避！紧张度降回 1 级。Roll=${roll}，请描写逃入建筑的过程。`;
+            }
+          } else {
+            res.narrativeInstruction = buildT2Narrative(action, tier, roll, res.newHp);
+          }
+        } else if (!targetId && state.currentHouseId) {
+          res.newHouseId = null;
+          res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲出建筑逃到街区！紧张度降回 1 级。Roll=${roll}，请描写逃出建筑的过程。`;
+        } else {
+          res.narrativeInstruction = buildT2Narrative(action, tier, roll, res.newHp);
+        }
+        return applyDeathHook(res);
+      }
+
+      const routeKey = (action === 'idle' || action === 'suicidal_idle') ? action : 'combat';
       const route = routeTable[routeKey] || routeTable['default'];
       const tier = rollToTier(route.probabilities, roll, res);
 
@@ -557,23 +624,48 @@ export class D20Resolver {
     const fromName = fromNode?.name || transit.fromNodeId;
     const toName = toNode?.name || transit.toNodeId;
 
-    // 旅途概率根据紧张度分级：
-    // tension 0-1（和平赶路）：失败率低，以推进为主
-    // tension 2+（危险赶路）：沿用 T1 explore 配置
-    const transitProbs: [number, number, number] = tension >= 2
-      ? (TENSION_ROUTE[1]['explore']?.probabilities ?? [0.15, 0.65, 0.20])
-      : [0.08, 0.72, 0.20]; // 和平赶路：仅 8% 受阻
-    const tier = rollToTier(transitProbs, roll, res);
+    // 旅途概率/扣血/紧张度按 tension 分级
+    let transitProbs: [number, number, number];
+    let failHpDelta: number;
+    let tensionOnFail: number;
+    let tensionOnCrit: number;
 
-    // HP 变化：和平赶路不扣血，危险赶路 tier=0 扣少量
-    if (tension >= 2 && tier === 0) {
-      res.newHp = Math.max(0, state.hp - 5);
+    if (tension >= 4) {
+      // T4 死斗追击：几乎跑不掉
+      transitProbs = [0.50, 0.40, 0.10];
+      failHpDelta = -25;
+      tensionOnFail = 0;   // 已经 4 级，不再升
+      tensionOnCrit = -2;
+    } else if (tension >= 3) {
+      // T3 精英追击：很难推进
+      transitProbs = [0.30, 0.60, 0.10];
+      failHpDelta = -15;
+      tensionOnFail = 1;
+      tensionOnCrit = -1;
+    } else if (tension >= 2) {
+      // T2 冲突赶路：中等危险
+      transitProbs = [0.15, 0.65, 0.20];
+      failHpDelta = -5;
+      tensionOnFail = 1;
+      tensionOnCrit = -1;
+    } else {
+      // T0-1 和平赶路：仅 8% 受阻
+      transitProbs = [0.08, 0.72, 0.20];
+      failHpDelta = 0;
+      tensionOnFail = 0;
+      tensionOnCrit = 0;
     }
 
-    // 紧张度变化：和平赶路（tension <= 1）绝不升级到 2+
+    const tier = rollToTier(transitProbs, roll, res);
+
+    // HP 变化
+    if (tier === 0 && failHpDelta < 0) {
+      res.newHp = Math.max(0, state.hp + failHpDelta);
+    }
+
+    // 紧张度变化
     if (tension >= 2) {
-      // 高紧张赶路：失败升级，成功降级
-      const tensionDelta = tier === 0 ? 1 : (tier === 2 ? -1 : 0);
+      const tensionDelta = tier === 0 ? tensionOnFail : (tier === 2 ? tensionOnCrit : 0);
       res.newTensionLevel = clampTension(tension + tensionDelta);
     } else {
       // 和平赶路：紧张度锁定在 0-1，不会升到 2
@@ -606,7 +698,7 @@ export class D20Resolver {
         pathProgress: newPathProgress,
         lockedTheme: transit.lockedTheme || null,
       };
-      res.narrativeInstruction = buildTransitNarrative(tier, roll, newPathProgress, fromName, toName, tension);
+      res.narrativeInstruction = buildTransitNarrative(tier, roll, newPathProgress, fromName, toName, tension, res.newHp);
     }
 
     return applyDeathHook(res);

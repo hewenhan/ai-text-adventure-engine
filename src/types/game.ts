@@ -51,6 +51,7 @@ export type IntentType = 'idle' | 'explore' | 'combat' | 'suicidal_idle' | 'move
 export interface IntentResult {
   intent: IntentType;
   targetId: string | null;
+  direction?: 'forward' | 'back';
 }
 
 // --- Debug & Profile ---

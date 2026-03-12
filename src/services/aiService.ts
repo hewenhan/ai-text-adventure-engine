@@ -310,7 +310,8 @@ export async function extractIntent(
   recentConversation: string,
   language: 'zh' | 'en' = 'zh',
   tensionLevel: number = 0,
-  lastIntent: string | null = null
+  lastIntent: string | null = null,
+  transitInfo: { fromName: string; toName: string; progress: number } | null = null
 ): Promise<IntentResult> {
   // BUG2: 求生本能（Survival Instinct）强制法则
   const survivalInstinctRule = tensionLevel >= 2
@@ -321,6 +322,12 @@ export async function extractIntent(
 任何模糊的、情绪化的、带有求生本能的表达 → 强制归类为 "combat"。`
     : '';
 
+  const transitContext = transitInfo
+    ? `\n\n【旅途状态 (TRANSIT STATE)】：玩家当前正在赶路中！从【${transitInfo.fromName}】前往【${transitInfo.toName}】，路程进度 ${transitInfo.progress}%。
+在旅途中，如果玩家表达想回去、折返、掉头、返回出发地等意图（如"回去"、"掉头"、"不去了"、"折返"、"turn back"、"go back"），必须判定为 intent="move" 且 direction="back"。
+如果玩家表达继续赶路、加快脚步、继续前进等，或者进行闲聊/互动，则 direction="forward"。`
+    : '';
+
   const prompt = `You are an intent classifier for a text adventure game. Classify the player's action into ONE intent category.
 
 Current Location: Node "${currentNodeId}", House "${currentHouseId || 'outdoors'}"
@@ -328,7 +335,7 @@ Visible Environment: ${visibleContext}
 Connected Nodes: ${connectedNodesInfo}
 Visible Houses: ${visibleHousesInfo}
 Current Tension Level: ${tensionLevel}
-Current Objective: ${currentObjectiveDesc || '\u65e0 (None - \u73a9\u5bb6\u5f53\u524d\u6f2b\u65e0\u76ee\u7684\uff0c\u82e5\u63d0\u8bae\u53bb\u672a\u77e5\u8fdc\u5904\uff0c\u8bf7\u52a1\u5fc5\u5224\u5b9a\u4e3a seek_quest)'}
+Current Objective: ${currentObjectiveDesc || '\u65e0 (None - \u73a9\u5bb6\u5f53\u524d\u6f2b\u65e0\u76ee\u7684\uff0c\u82e5\u63d0\u8bae\u53bb\u672a\u77e5\u8fdc\u5904\uff0c\u8bf7\u52a1\u5fc5\u5224\u5b9a\u4e3a seek_quest)'}${transitContext}
 
 Recent Conversation Context (for understanding intent continuity):
 ${recentConversation || 'No prior conversation.'}
@@ -363,8 +370,8 @@ Output: {"intent": "move", "targetId": "n2"}
 === REAL TASK ===
 Player Input: "${userInput}"
 
-Return ONLY a trimmed JSON object: { "intent": "idle|explore|combat|suicidal_idle|move|seek_quest", "targetId": "nodeId_or_houseId_or_null" }
-IMPORTANT: If targetId is null, use the literal null value (targetId: null), NOT the string "null".
+Return ONLY a trimmed JSON object: { "intent": "idle|explore|combat|suicidal_idle|move|seek_quest", "targetId": "nodeId_or_houseId_or_null"${transitInfo ? ', "direction": "forward|back"' : ''} }
+IMPORTANT: If targetId is null, use the literal null value (targetId: null), NOT the string "null".${transitInfo ? ' direction is REQUIRED when player is in transit.' : ''}
 No markdown formatting.`;
 
   const result = await ai.models.generateContent({
@@ -381,7 +388,8 @@ No markdown formatting.`;
     const parsed = JSON.parse(cleaned);
     const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest'];
     if (validIntents.includes(parsed.intent)) {
-      return { intent: parsed.intent, targetId: parsed.targetId || null };
+      const direction = parsed.direction === 'back' ? 'back' as const : parsed.direction === 'forward' ? 'forward' as const : undefined;
+      return { intent: parsed.intent, targetId: parsed.targetId || null, direction };
     }
   } catch (e) {
     console.error("Intent extraction parse error, attempting regex fallback", e);
@@ -392,7 +400,8 @@ No markdown formatting.`;
         const fallbackParsed = JSON.parse(braceMatch[0]);
         const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest'];
         if (validIntents.includes(fallbackParsed.intent)) {
-          return { intent: fallbackParsed.intent, targetId: fallbackParsed.targetId || null };
+          const direction = fallbackParsed.direction === 'back' ? 'back' as const : fallbackParsed.direction === 'forward' ? 'forward' as const : undefined;
+          return { intent: fallbackParsed.intent, targetId: fallbackParsed.targetId || null, direction };
         }
       } catch (e2) {
         console.error("Regex fallback also failed", e2);
