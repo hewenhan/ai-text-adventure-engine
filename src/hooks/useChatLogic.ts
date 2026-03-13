@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useGame } from '../contexts/GameContext';
 import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
-import { generateSummary, generateTurn, generateImage, extractIntent, IMAGE_PROHIBITED_SENTINEL } from '../services/aiService';
+import { generateSummary, generateTurn, generateImage, extractIntent, resolveObjectivePathfinding, IMAGE_PROHIBITED_SENTINEL } from '../services/aiService';
 import { uploadImageToDrive } from '../lib/drive';
 import { D20Resolver } from '../lib/D20Resolver';
 import { useGrandNotification, type GrandNotificationData } from '../components/GrandNotification';
@@ -206,9 +206,23 @@ export function useChatLogic() {
         transitInfo
       );
 
-      console.log("Intent:", intent);
+      // ── Step 1.5a: 宏观寻路拦截 ──
+      // 如果意图分类返回 targetId='current_objective'，用 BFS 寻路拆解为具体微操
+      if (intent.targetId === 'current_objective' && state.currentObjective && state.worldData) {
+        const pathResult = resolveObjectivePathfinding(
+          state.currentNodeId!,
+          state.currentHouseId,
+          state.currentObjective,
+          state.worldData.nodes
+        );
+        intent.intent = pathResult.intent;
+        intent.targetId = pathResult.targetId;
+        console.log("Intent (pathfinding resolved):", intent);
+      } else {
+        console.log("Intent:", intent);
+      }
 
-      // ── Step 1.5: Director Interceptor (seek_quest) ──
+      // ── Step 1.5b: Director Interceptor (seek_quest) ──
       // 当 tension=0 且没有目标且长时间闲聊，自动触发 seek_quest
       if (intent.intent === 'idle' && state.pacingState.tensionLevel === 0 
           && !state.currentObjective && state.pacingState.turnsInCurrentLevel >= 3) {
@@ -363,6 +377,21 @@ export function useChatLogic() {
           description: `任务目标所在区域已进入视野`,
         });
       }
+      // 探索进度提升导致的建筑揭盲通知
+      const revealNode = state.worldData?.nodes.find(n => n.id === resolution.newNodeId);
+      if (revealNode && !resolution.newTransitState) {
+        const oldVisible = getVisibleHouses(revealNode, state.progressMap, state.currentObjective);
+        const newVisible = getVisibleHouses(revealNode, resolution.newProgressMap, state.currentObjective);
+        const oldIds = new Set(oldVisible.map(h => h.id));
+        const newlyRevealed = newVisible.filter(h => !oldIds.has(h.id));
+        for (const house of newlyRevealed) {
+          pendingNotifications.push({
+            type: 'discovery',
+            title: '发现新建筑！',
+            description: `在【${revealNode.name}】发现了【${house.name}】`,
+          });
+        }
+      }
 
       // ── Build recent history text ──
       const allMessagesForPrompt = [...state.history, { role: 'user', text: userInput } as const];
@@ -377,7 +406,7 @@ export function useChatLogic() {
       if (resolution.newTransitState) {
         const fromNode = findNode(state, resolution.newTransitState.fromNodeId);
         const toNode = findNode(state, resolution.newTransitState.toNodeId);
-        locationContext = `【当前位置】：荒野旅途。正在从【${fromNode?.name || resolution.newTransitState.fromNodeId}】徒步赶往【${toNode?.name || resolution.newTransitState.toNodeId}】的路上。(当前路程进度：${resolution.newTransitState.pathProgress}%)。${resolution.newTensionLevel >= 2 ? '请侧重描写沿途遭遇的危险和冲突。' : '请侧重描写沿途的风景、路况、天气和同伴互动，不要凭空制造危险。'}`;
+        locationContext = `【当前位置】：正在从【${fromNode?.name || resolution.newTransitState.fromNodeId}】赶往【${toNode?.name || resolution.newTransitState.toNodeId}】。(当前路程进度：${resolution.newTransitState.pathProgress}%)。${resolution.newTensionLevel >= 2 ? '请侧重描写沿途遭遇的危险和冲突。' : '请结合上下文世界观和角色性格或经历发表互动和思考，不要凭空制造危险。'}`;
       } else {
         const updatedNode = findNode(state, resolution.newNodeId);
         if (updatedNode) {

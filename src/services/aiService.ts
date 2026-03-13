@@ -1,7 +1,75 @@
 import { ai, TEXT_MODEL, PRO_MODEL, PRO_IMAGE_MODEL, IMAGE_MODEL, LITE_MODEL } from '../lib/gemini';
 import { HarmCategory, HarmBlockThreshold } from '@google/genai';
-import type { IntentResult, WorldData, CharacterProfile } from '../types/game';
+import type { IntentResult, WorldData, CharacterProfile, NodeData, GameState } from '../types/game';
 import { normalizeConnections } from '../types/game';
+
+/**
+ * 宏观寻路：BFS 找到从当前位置到目标的下一步微操。
+ * - 若玩家在屋内 → 先退出建筑
+ * - 若已在目标节点 → 进入目标建筑（若有）
+ * - 否则 BFS 找最短路径的下一个相邻节点
+ */
+export function resolveObjectivePathfinding(
+  currentNodeId: string,
+  currentHouseId: string | null,
+  objective: NonNullable<GameState['currentObjective']>,
+  nodes: NodeData[]
+): IntentResult {
+  const { targetNodeId, targetHouseId } = objective;
+
+  // 1. 已经在目标节点
+  if (currentNodeId === targetNodeId) {
+    if (currentHouseId) {
+      if (currentHouseId === targetHouseId) {
+        // 已经在目标建筑里了，explore
+        return { intent: 'explore', targetId: null };
+      }
+      // 在同节点的其他建筑里 → 先退出
+      return { intent: 'move', targetId: null };
+    }
+    // 在目标节点野外 → 进入目标建筑
+    if (targetHouseId) {
+      return { intent: 'move', targetId: targetHouseId };
+    }
+    // 目标节点无特定建筑，explore
+    return { intent: 'explore', targetId: null };
+  }
+
+  // 2. 不在目标节点，但在屋内 → 先退出建筑
+  if (currentHouseId) {
+    return { intent: 'move', targetId: null };
+  }
+
+  // 3. BFS 寻路到目标节点
+  const adjMap = new Map<string, string[]>();
+  for (const n of nodes) {
+    adjMap.set(n.id, n.connections);
+  }
+
+  const visited = new Set<string>([currentNodeId]);
+  // queue: [nodeId, firstStepNodeId]
+  const queue: [string, string][] = [];
+  for (const neighbor of adjMap.get(currentNodeId) || []) {
+    visited.add(neighbor);
+    queue.push([neighbor, neighbor]);
+  }
+
+  while (queue.length > 0) {
+    const [nodeId, firstStep] = queue.shift()!;
+    if (nodeId === targetNodeId) {
+      return { intent: 'move', targetId: firstStep };
+    }
+    for (const neighbor of adjMap.get(nodeId) || []) {
+      if (!visited.has(neighbor)) {
+        visited.add(neighbor);
+        queue.push([neighbor, firstStep]);
+      }
+    }
+  }
+
+  // 无路可达（不应出现），fallback
+  return { intent: 'idle', targetId: null };
+}
 
 export async function generateSummary(currentSummary: string, messagesToSummarize: any[], language: 'zh' | 'en' = 'zh'): Promise<string | undefined> {
   const textToSummarize = messagesToSummarize.map(m => `${m.role}: ${m.text}`).join('\n');
@@ -445,6 +513,7 @@ export async function extractIntent(
     : '';
 
   // 1. 动态隔离旅途规则 (彻底消除幽灵指令干扰)
+// 1. 动态隔离旅途规则 (彻底消除幽灵指令干扰)
   const transitRules = transitInfo
     ? `
 **TRANSIT STATE (ACTIVE) SPECIAL RULES:**
@@ -468,18 +537,21 @@ ${transitRules}
 ${recentConversation || 'No prior conversation.'}
 
 **INTENT CATEGORIES & ENGINE ROUTING RULES:**
-1. "seek_quest": Travel to a macro-destination NOT listed in Connected Nodes/Visible Houses. (Overrides chat/idle).
-2. "move": 
-   - Travel to a destination explicitly listed in Connected Nodes/Visible Houses.
-   - OR attempting to LEAVE the current enclosed space (e.g., opening a locked door to exit, saying "let's go out"). 
-   - **TargetId Rule**: If moving to a specific node/house, use EXACTLY the ID (e.g., "n2", "h1"). If simply exiting a house to the outdoors, set targetId to "outdoors" (or null if your engine requires).
+1. "seek_quest": (MACRO TRAVEL & PROGRESSION)
+   - Triggered when the player expresses a general intent to set off, progress the story, or travel toward the Current Objective (e.g., "好的，赶紧出发吧", "let's go", "去村里").
+   - **TargetId Rule**: MUST set targetId to EXACTLY "current_objective". (The backend engine will intercept this flag and calculate the micro-pathfinding).
+2. "move": (MICRO TRAVEL)
+   - Triggered ONLY when the player explicitly names a specific, adjacent destination listed in Connected Nodes/Visible Houses (e.g., "去客厅", "去卫生间").
+   - OR when they attempt to just step outside the current enclosed space without mentioning the macro-goal.
+   - **TargetId Rule**: MUST use EXACTLY the Node/House ID (e.g., "n2", "h1"). If simply exiting a house to the outdoors, set targetId to "outdoors".
+   - **CRITICAL BAN**: Do NOT classify vague commands like "出发" as "move" if there is an active Current Objective. Route those to "seek_quest".
 3. "explore": Actively searching, inspecting, or physically interacting with objects (e.g., smashing a door, checking a smell) WITHOUT the explicit macro-intent to travel/leave.
 4. "idle": Roleplaying, resting, chatting *unless* it contains a physical action or travel request.
 5. "combat" / "suicidal_idle": As applicable.
 
 **CRITICAL DISTINCTION FOR PHYSICAL ACTIONS:**
 If the player interacts with a door/exit (e.g., "拉门把手", "踹门"):
-- If context shows they are trying to transition to a new location/exit -> "move".
+- If context shows they are trying to transition to a new location/exit -> "move" (or "seek_quest" if heading to the macro-objective).
 - If they are just overcoming a physical obstacle (e.g., door is jammed) or inspecting it -> "explore".
 
 === REAL TASK ===
@@ -488,7 +560,7 @@ Player Input: "${userInput}"
 Output strictly in this JSON schema. Return ONLY JSON, no markdown formatting:
 {
   "intent": "<ONE of the 5 categories above>",
-  "targetId": "<EXACT ID of the destination (e.g., 'n2'), or null if not applicable/leaving to outdoors>",
+  "targetId": "<EXACT ID (e.g., 'n2'), 'current_objective' if seek_quest, 'outdoors' if exiting, or null>",
   "direction": "<'forward', 'back', or null if Transit is INACTIVE>"
 }`;
 

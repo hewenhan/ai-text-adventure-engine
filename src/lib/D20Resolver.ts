@@ -178,7 +178,7 @@ function buildTransitNarrative(tier: number, roll: number, progress: number, fro
   if (tier === 2) {
     return `【系统指令 - 旅途顺遂】：赶路大幅推进！路程进度达到${progress}%。Roll=${roll}，请描写沿途发现捷径或顺风顺水的旅途场景。同伴可以聊聊天、讨论前方的计划。`;
   }
-  return `【系统指令 - 旅途推进】：赶路稳步前进，路程进度达到${progress}%。Roll=${roll}，请描写沿途的风景、路况或小插曲。同伴之间可以边走边聊。`;
+  return `【系统指令 - 旅途推进】：赶路稳步前进，路程进度达到${progress}%。Roll=${roll}，请结合上下文世界观和角色性格或经历发表互动和思考。同伴之间可以边走边聊。`;
 }
 
 // ─── Death Hook ─────────────────────────────────────────────────
@@ -344,7 +344,7 @@ export class D20Resolver {
         res.newTensionLevel = 0;
         res.newHp = Math.min(100, state.hp + 5);
         res.isSuccess = true;
-        res.narrativeInstruction = '【系统强制】：安全区内纯剧情休整，维持现状，略微恢复体力。请描写平静的互动与氛围。';
+        res.narrativeInstruction = '【系统强制】：安全区内纯剧情休整，维持现状，略微恢复体力。请结合上下文世界观和角色性格或经历描写平静的互动与氛围。';
         return applyDeathHook(res);
       }
     }
@@ -377,6 +377,24 @@ export class D20Resolver {
             res.isSuccess = true;
             res.narrativeInstruction = '【系统强制】：玩家选择离开安全区，踏入外部世界。当前紧张度强制升至1级（探索态）。请描写出发踏上旅途的场景。';
           }
+        } else if (targetId && currentNode) {
+          // 尝试进入当前节点内的建筑
+          const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
+          const targetHouse = visibleHouses.find(h => h.id === targetId);
+          if (targetHouse) {
+            if (state.currentHouseId && state.currentHouseId !== targetId) {
+              res.newHouseId = null;
+              res.isSuccess = true;
+              res.narrativeInstruction = `【系统指令】：玩家走出当前建筑来到街区野外，正准备前往${targetHouse.name}。请描写走出建筑的场景。`;
+            } else {
+              res.newHouseId = targetId;
+              res.isSuccess = true;
+              res.narrativeInstruction = `【系统指令】：玩家进入${targetHouse.name}。请描写进入该建筑的场景。`;
+            }
+          } else {
+            res.isSuccess = false;
+            res.narrativeInstruction = '【系统指令】：目标位置未揭盲或不可达。请描写找不到出路的场景。';
+          }
         } else if (state.currentHouseId) {
           // 玩家在建筑内想出去 → 退出建筑到街区野外
           res.newHouseId = null;
@@ -404,7 +422,7 @@ export class D20Resolver {
         : `node_${state.currentNodeId}`;
       if ((state.progressMap[cbProgressKey] || 0) >= 100) {
         res.isSuccess = true;
-        res.narrativeInstruction = '【系统指令】：玩家试图继续探索，但此区域物资和线索已被彻底搜刮殆尽。请告诉玩家这里已经空了，建议前往其他地方。';
+        res.narrativeInstruction = '【系统指令】：玩家试图继续探索，但此区域物资和线索已被彻底搜刮殆尽。请结合上下文世界观和角色性格或经历告诉玩家这里已经空了，建议前往其他地方。';
         return res;
       }
     }
