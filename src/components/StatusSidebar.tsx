@@ -85,19 +85,19 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
           {/* Affection */}
           <div>
             <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider flex items-center gap-1">
-              <Heart className="w-3.5 h-3.5" fill={state.affection >= 50 ? 'currentColor' : 'none'} /> 好感度
+              <Heart className="w-3.5 h-3.5" fill={state.affection >= 60 ? 'currentColor' : 'none'} /> 好感度
             </h3>
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span>{state.characterSettings.name}</span>
-                <span className={state.affection >= 80 ? 'text-pink-400' : state.affection >= 50 ? 'text-rose-400' : state.affection >= 20 ? 'text-zinc-300' : 'text-zinc-600'}>
+                <span className={state.affection >= 80 ? 'text-pink-400' : state.affection >= 60 ? 'text-rose-400' : state.affection >= 20 ? 'text-zinc-300' : 'text-zinc-600'}>
                   {state.affection} / 100
                 </span>
               </div>
               <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
                 <div 
                   className={`h-full rounded-full transition-all ${
-                    state.affection >= 80 ? 'bg-pink-500' : state.affection >= 50 ? 'bg-rose-500' : state.affection >= 20 ? 'bg-zinc-500' : 'bg-zinc-700'
+                    state.affection >= 80 ? 'bg-pink-500' : state.affection >= 60 ? 'bg-rose-500' : state.affection >= 20 ? 'bg-zinc-500' : 'bg-zinc-700'
                   }`}
                   style={{ width: `${state.affection}%` }}
                 />

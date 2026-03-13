@@ -689,7 +689,7 @@ export class D20Resolver {
       } else {
         res.newTensionLevel = 1;
       }
-      res.narrativeInstruction = `【系统指令 - 抵达目的地】：经过长途跋涉，终于抵达了【${toName}】！Roll=${roll}，请描写到达新地点时的所见所闻，展现该区域的独特风貌。`;
+      res.narrativeInstruction = `【系统指令 - 抵达目的地】：经过长途跋涉，终于抵达了【${toName}】！Roll=${roll}，路上所见所闻，最后一句表达抵达时的情绪和环境。`;
     } else {
       // 仍在路上
       res.newTransitState = {
