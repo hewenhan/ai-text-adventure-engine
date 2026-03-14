@@ -31,9 +31,9 @@ export function getVisibleHouses(node: NodeData): HouseData[] {
 export function extractProgressMap(worldData: WorldData): Record<string, number> {
   const map: Record<string, number> = {};
   for (const node of worldData.nodes) {
-    if (node.progress) map[`node_${node.id}`] = node.progress;
+    if (node.progress != null) map[`node_${node.id}`] = node.progress;
     for (const house of node.houses) {
-      if (house.progress) map[`house_${house.id}`] = house.progress;
+      if (house.progress != null) map[`house_${house.id}`] = house.progress;
     }
   }
   return map;

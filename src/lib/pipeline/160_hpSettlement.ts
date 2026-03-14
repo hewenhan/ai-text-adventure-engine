@@ -5,7 +5,6 @@
  * - 根据 tier + tensionConfig.hpDelta 计算 HP 增减
  * - 安全区内自动回血 +5
  * - 赶路中的 HP 按紧张度分级计算
- * - T3 move 特殊：失败时慌不择路额外扣血
  */
 
 import type { PipelineContext } from './types';
@@ -19,7 +18,6 @@ export function stepHpSettlement(ctx: PipelineContext): void {
   // ── 安全区回血 ──
   if (ctx.isInSafeZone && !state.transitState) {
     ctx.newHp = Math.min(100, state.hp + 5);
-    // 安全区内不扣血，直接返回
     return;
   }
 
@@ -33,29 +31,6 @@ export function stepHpSettlement(ctx: PipelineContext): void {
 
     if (ctx.tier === 0 && failHpDelta < 0) {
       ctx.newHp = Math.max(0, state.hp + failHpDelta);
-    }
-    // 普通/大成功不扣血
-    return;
-  }
-
-  // ── T3 move 慌不择路特殊扣血 ──
-  if (tension === 3 && action === 'move') {
-    if (state.currentHouseId) {
-      // 在建筑内冲出：走 tensionConfig
-      const route = TENSION_ROUTE[3]?.['move'];
-      if (route) {
-        ctx.newHp = Math.max(0, Math.min(100, state.hp + route.hpDelta[ctx.tier]));
-      }
-    } else if (!ctx.moveSucceeded && ctx.moveTarget?.type !== 'cross-node'
-      && ctx.moveTarget?.type !== 'enter-house' && ctx.moveTarget?.type !== 'exit-to-house') {
-      // 慌不择路 → 额外 -20
-      ctx.newHp = Math.max(0, state.hp - 20);
-    } else {
-      // 走 tensionConfig
-      const route = TENSION_ROUTE[3]?.['move'];
-      if (route) {
-        ctx.newHp = Math.max(0, Math.min(100, state.hp + route.hpDelta[ctx.tier]));
-      }
     }
     return;
   }
