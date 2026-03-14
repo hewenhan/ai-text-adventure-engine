@@ -231,8 +231,8 @@ function applyMilestoneHook(res: TurnResolution, state: GameState): TurnResoluti
 
 /**
  * 好感度概率检定：高好感度在危机中提供援助，低好感度落井下石。
- * 帮助概率 = (0.75 * affection - 60) / 100
- * 例：100好感=15%援助率；80好感=-15%；60=-15%；0好感=-60%吃瘪率
+ * 帮助概率 = 0.75(affection - 60)/100，
+ * 范围[-45%, +30%]，以60好感为中值，0好感-45%援助率，100好感+30%援助率。
  * 返回 roll 的加减值 (+3 援助, -3 落井下石, 0 无触发)
  */
 function applyAffectionModifier(affection: number, tension: number, roll: number): { adjustedRoll: number; triggered: 'aid' | 'sabotage' | null; detail: string } {
@@ -241,9 +241,9 @@ function applyAffectionModifier(affection: number, tension: number, roll: number
     return { adjustedRoll: roll, triggered: null, detail: `好感度修正: 跳过(tension=${tension}<2)` };
   }
 
-  const helpProb = (0.75 * affection - 60) / 100; // range: -0.60 to +0.15
+  const helpProb = (0.75 * (affection - 60)) / 100; // range: -0.45 to +0.30
   const diceRoll = Math.random();
-  const probStr = `P=(0.75×${affection}-60)/100=${helpProb.toFixed(2)}`;
+  const probStr = `P=0.75×(${affection}-60)/100=${helpProb.toFixed(2)}`;
   const diceStr = `随机=${diceRoll.toFixed(3)}`;
 
   if (helpProb > 0 && diceRoll < helpProb) {
