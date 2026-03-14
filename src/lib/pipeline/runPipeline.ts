@@ -20,16 +20,16 @@
 import type { GameState, IntentResult } from '../../types/game';
 import type { PipelineContext, PipelineResult } from './types';
 
-import { stepProgressCalc } from './01_progressCalc';
-import { stepD20Roll } from './02_d20Roll';
-import { stepBehaviorOverride } from './03_behaviorOverride';
-import { stepMoveResolve } from './04_moveResolve';
-import { stepTensionDelta } from './05_tensionDelta';
-import { stepSafeZoneOverride } from './06_safeZoneOverride';
-import { stepMilestone } from './07_milestone';
-import { stepHpSettlement } from './08_hpSettlement';
-import { stepDeathSettlement } from './09_deathSettlement';
-import { stepBgmAndNarrative } from './10_bgmAndNarrative';
+import { stepProgressCalc } from './020_progressCalc';
+import { stepD20Roll } from './040_d20Roll';
+import { stepBehaviorOverride } from './060_behaviorOverride';
+import { stepMoveResolve } from './080_moveResolve';
+import { stepTensionDelta } from './100_tensionDelta';
+import { stepSafeZoneOverride } from './120_safeZoneOverride';
+import { stepMilestone } from './140_milestone';
+import { stepHpSettlement } from './160_hpSettlement';
+import { stepDeathSettlement } from './180_deathSettlement';
+import { stepBgmAndNarrative } from './200_bgmAndNarrative';
 
 /**
  * 初始化管线上下文：从当前 GameState 快照 + 意图 + D20 骰子创建
