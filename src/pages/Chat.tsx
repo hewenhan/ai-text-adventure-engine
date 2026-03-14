@@ -162,18 +162,14 @@ export default function Chat() {
 
           // Generate map image in background (non-blocking)
           generateMapImage(result.worldData, state.worldview, finalArtStyle).then(async base64 => {
-            if (base64) {
-              if (isAuthenticated && accessToken) {
-                try {
-                  const fileName = `ai_rpg_map_${Date.now()}.png`;
-                  await uploadImageToDrive(accessToken, base64, fileName);
-                  updateState({ mapImageFileName: fileName });
-                } catch (e) {
-                  console.error("Map image upload to Drive failed", e);
-                  updateState({ mapImageFileName: `data:image/png;base64,${base64}` });
-                }
-              } else {
-                updateState({ mapImageFileName: `data:image/png;base64,${base64}` });
+            if (base64 && isAuthenticated && accessToken) {
+              try {
+                const fileName = `ai_rpg_map_${Date.now()}.png`;
+                await uploadImageToDrive(accessToken, base64, fileName);
+                updateState({ mapImageFileName: fileName });
+              } catch (e) {
+                console.error("Map image upload to Drive failed, discarding base64 to avoid bloating save", e);
+                // 不写入 base64，下次打开地图时可重新生成
               }
             }
           }).catch(e => console.error("Map image generation failed", e));

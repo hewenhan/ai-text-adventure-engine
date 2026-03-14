@@ -3,7 +3,8 @@ import { motion } from 'motion/react';
 import { X, MapPin, Lock, Eye, ArrowRight, Target } from 'lucide-react';
 import { GameState, WorldData } from '../types/game';
 import { useAuth } from '../contexts/AuthContext';
-import { getImageUrlByName } from '../lib/drive';
+import { useGame } from '../contexts/GameContext';
+import { getImageUrlByName, uploadImageToDrive } from '../lib/drive';
 import { ZoomableImage } from './ZoomableImage';
 
 interface MapOverlayProps {
@@ -43,18 +44,33 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
   if (!worldData) return null;
 
   const { accessToken } = useAuth();
+  const { updateState } = useGame();
   const currentNodeId = state.currentNodeId;
   const currentHouseId = state.currentHouseId;
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [mapImageUrl, setMapImageUrl] = useState<string | null>(null);
 
-  // Load map image: either from Drive (filename) or direct data URL
+  // Load map image: from Drive filename; 兼容老存档中残留的 base64 data URL 并尝试迁移上传
   useEffect(() => {
     if (!state.mapImageFileName) return;
+
+    // 老存档兼容：如果还是 data: base64，先显示、然后尝试补传 Drive 清理存档
     if (state.mapImageFileName.startsWith('data:')) {
       setMapImageUrl(state.mapImageFileName);
+      if (accessToken) {
+        // 异步迁移：提取 raw base64 上传 Drive，替换掉 data URL
+        const raw = state.mapImageFileName.replace(/^data:image\/\w+;base64,/, '');
+        const fileName = `ai_rpg_map_migrated_${Date.now()}.png`;
+        uploadImageToDrive(accessToken, raw, fileName)
+          .then(() => {
+            updateState({ mapImageFileName: fileName });
+            console.log('[MapOverlay] Migrated base64 map to Drive:', fileName);
+          })
+          .catch(e => console.warn('[MapOverlay] Base64 migration failed, will retry next time', e));
+      }
       return;
     }
+
     if (!accessToken) return;
     let cancelled = false;
     getImageUrlByName(accessToken, state.mapImageFileName).then(url => {
