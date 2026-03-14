@@ -1,13 +1,13 @@
 import { motion } from 'motion/react';
-import { PlayerProfile } from '../types/game';
+import type { Gender, Orientation } from '../types/game';
 
 interface ProfileModalProps {
   tempName: string;
   setTempName: (name: string) => void;
-  tempGender: PlayerProfile['gender'];
-  setTempGender: (gender: PlayerProfile['gender']) => void;
-  tempOrientation: PlayerProfile['orientation'];
-  setTempOrientation: (orientation: PlayerProfile['orientation']) => void;
+  tempGender: Gender;
+  setTempGender: (gender: Gender) => void;
+  tempOrientation: Orientation;
+  setTempOrientation: (orientation: Orientation) => void;
   onSubmit: () => void;
 }
 

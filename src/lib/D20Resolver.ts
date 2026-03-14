@@ -259,6 +259,52 @@ function applyAffectionModifier(affection: number, tension: number, roll: number
   return { adjustedRoll: roll, triggered: null, detail: `好感度修正: ${probStr}, ${diceStr} 未触发(阈值${Math.abs(helpProb).toFixed(2)}), Roll不变=${roll}` };
 }
 
+// ─── Move Target Resolution ────────────────────────────────────
+
+type MoveTarget =
+  | { type: 'cross-node'; targetNodeId: string; targetName: string; fromBuilding: boolean }
+  | { type: 'enter-house'; house: HouseData }
+  | { type: 'exit-to-house'; house: HouseData }
+  | { type: 'exit-building' }
+  | { type: 'unreachable' }
+  | { type: 'no-target' };
+
+function resolveMoveTarget(
+  state: GameState,
+  intent: IntentResult,
+  currentNode: NodeData | undefined
+): MoveTarget {
+  const targetId = intent.targetId;
+
+  if (targetId && currentNode?.connections.includes(targetId)) {
+    const targetNode = findNode(state, targetId);
+    return {
+      type: 'cross-node',
+      targetNodeId: targetId,
+      targetName: targetNode?.name || targetId,
+      fromBuilding: !!state.currentHouseId,
+    };
+  }
+
+  if (targetId && currentNode) {
+    const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
+    const targetHouse = visibleHouses.find(h => h.id === targetId);
+    if (targetHouse) {
+      if (state.currentHouseId && state.currentHouseId !== targetId) {
+        return { type: 'exit-to-house', house: targetHouse };
+      }
+      return { type: 'enter-house', house: targetHouse };
+    }
+    return { type: 'unreachable' };
+  }
+
+  if (state.currentHouseId) {
+    return { type: 'exit-building' };
+  }
+
+  return { type: 'no-target' };
+}
+
 // ─── Main Resolver ──────────────────────────────────────────────
 
 export class D20Resolver {
@@ -314,24 +360,28 @@ export class D20Resolver {
     const nodeProgress = nodeProgressKey ? (state.progressMap[nodeProgressKey] || 0) : 0;
     const isNodeFullyExplored = nodeProgress >= 100 && !state.currentHouseId;
 
+    // ─── 进度熔断锁 (全局统一) ─────
+    if (action === 'explore') {
+      const capKey = state.currentHouseId
+        ? `house_${state.currentHouseId}`
+        : `node_${state.currentNodeId}`;
+      if ((state.progressMap[capKey] || 0) >= 100) {
+        res.isSuccess = true;
+        if (isInSafeZone) res.newTensionLevel = 0;
+        res.narrativeInstruction = '【系统指令】：玩家试图继续探索，但此区域物资和线索已被彻底搜刮殆尽。请结合上下文世界观和角色性格或经历告诉玩家这里已经空了，建议前往其他地方。';
+        return applyDeathHook(res);
+      }
+    }
+
     if (isInSafeZone) {
-      // 在安全区域：允许 idle、move 和 explore
       if (action === 'move') {
         // 允许移动，落入下方 tension-specific 逻辑
       } else if (action === 'explore') {
-        // BUG1b: 允许在 Tension 0 安全区下执行 explore，使用纯探索无伤配置表 [0, 0.7, 0.3]
         const safeExploreProbs: [number, number, number] = [0, 0.7, 0.3];
         const tier = rollToTier(safeExploreProbs, roll, res);
         const progressKey = state.currentHouseId
           ? `house_${state.currentHouseId}`
           : `node_${state.currentNodeId}`;
-        // BUG3: 进度熔断锁 - 安全区内也生效
-        if ((state.progressMap[progressKey] || 0) >= 100) {
-          res.isSuccess = true;
-          res.newTensionLevel = 0;
-          res.narrativeInstruction = '【系统指令】：玩家试图继续探索，但此区域物资和线索已被彻底搜刮殆尽。请告诉玩家这里已经空了，建议前往其他地方。';
-          return applyDeathHook(res);
-        }
         const progressGain = tier === 2 ? 40 : 15;
         res.newProgressMap[progressKey] = Math.min(100, (res.newProgressMap[progressKey] || 0) + progressGain);
         res.newTensionLevel = 0;
@@ -340,7 +390,6 @@ export class D20Resolver {
         res.narrativeInstruction = `【系统指令】：安全区域内的平稳探索。进度+${progressGain}（当前${res.newProgressMap[progressKey]}%）。Roll=${roll}，请描写安全搜刮、平稳推进的场面，不会有任何危险。`;
         return applyMilestoneHook(applyDeathHook(res), state);
       } else {
-        // 强制 tension 0，纯聊天/休整
         res.newTensionLevel = 0;
         res.newHp = Math.min(100, state.hp + 5);
         res.isSuccess = true;
@@ -353,80 +402,72 @@ export class D20Resolver {
     const routeTable = TENSION_ROUTE[tension];
     if (!routeTable) return res;
 
-    // ─── Tension 0 ─────
-    if (tension === 0) {
-      if (action === 'move') {
-        const targetId = intent.targetId;
-        if (targetId && currentNode?.connections.includes(targetId)) {
-          if (state.currentHouseId) {
-            // 玩家在建筑内想跨节点移动 → 先退出建筑
+    // ─── T0/T1 和平移动 (共用逻辑) ─────
+    if (tension <= 1 && action === 'move') {
+      const mt = resolveMoveTarget(state, intent, currentNode);
+      switch (mt.type) {
+        case 'cross-node':
+          if (mt.fromBuilding) {
             res.newHouseId = null;
             res.isSuccess = true;
-            const targetNode = findNode(state, targetId);
-            res.narrativeInstruction = `【系统指令】：玩家走出当前建筑，准备前往【${targetNode?.name || targetId}】。请描写走出建筑来到街区的场景。`;
+            res.narrativeInstruction = `【系统指令】：玩家走出当前建筑，准备前往【${mt.targetName}】。请描写走出建筑来到街区的场景。`;
           } else {
-            // 已在野外 → 进入 transit state
             res.newTransitState = {
               fromNodeId: state.currentNodeId!,
-              toNodeId: targetId,
+              toNodeId: mt.targetNodeId,
               pathProgress: 0,
               lockedTheme: null,
             };
             res.newHouseId = null;
-            res.newTensionLevel = 1;
             res.isSuccess = true;
-            res.narrativeInstruction = '【系统强制】：玩家选择离开安全区，踏入外部世界。当前紧张度强制升至1级（探索态）。请描写出发踏上旅途的场景。';
-          }
-        } else if (targetId && currentNode) {
-          // 尝试进入当前节点内的建筑
-          const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
-          const targetHouse = visibleHouses.find(h => h.id === targetId);
-          if (targetHouse) {
-            if (state.currentHouseId && state.currentHouseId !== targetId) {
-              res.newHouseId = null;
-              res.isSuccess = true;
-              res.narrativeInstruction = `【系统指令】：玩家走出当前建筑来到街区野外，正准备前往${targetHouse.name}。请描写走出建筑的场景。`;
+            if (tension === 0) {
+              res.newTensionLevel = 1;
+              res.narrativeInstruction = '【系统强制】：玩家选择离开安全区，踏入外部世界。当前紧张度强制升至1级（探索态）。请描写出发踏上旅途的场景。';
             } else {
-              res.newHouseId = targetId;
-              res.isSuccess = true;
-              res.narrativeInstruction = `【系统指令】：玩家进入${targetHouse.name}。请描写进入该建筑的场景。`;
+              res.narrativeInstruction = '【系统指令】：玩家踏上旅途，正在赶往新区域。请描写动身离开与旅途初段的见闻。';
             }
-          } else {
-            res.isSuccess = false;
-            res.narrativeInstruction = '【系统指令】：目标位置未揭盲或不可达。请描写找不到出路的场景。';
           }
-        } else if (state.currentHouseId) {
-          // 玩家在建筑内想出去 → 退出建筑到街区野外
+          break;
+        case 'enter-house':
+          res.newHouseId = mt.house.id;
+          res.isSuccess = true;
+          res.narrativeInstruction = `【系统指令】：玩家进入${mt.house.name}。请描写进入该建筑的场景。`;
+          break;
+        case 'exit-to-house':
+          res.newHouseId = null;
+          res.isSuccess = true;
+          res.narrativeInstruction = `【系统指令】：玩家走出当前建筑来到街区野外，正准备前往${mt.house.name}。请描写走出建筑的场景。`;
+          break;
+        case 'exit-building':
           res.newHouseId = null;
           res.isSuccess = true;
           res.narrativeInstruction = '【系统指令】：玩家退出当前建筑，回到街区野外。请描写走出建筑的场景。';
-        } else {
-          res.narrativeInstruction = '【系统强制】：玩家尝试移动但目标位置不可达。请描写路被阻断。';
+          break;
+        case 'unreachable':
           res.isSuccess = false;
-        }
-      } else {
-        const route = routeTable['default'];
-        const tier = rollToTier(route.probabilities, roll, res);
-        res.newHp = Math.max(0, Math.min(100, state.hp + route.hpDelta[tier]));
-        res.isSuccess = true;
-        res.narrativeInstruction = buildT0Narrative(action, tier, roll, res.newHp);
+          res.narrativeInstruction = '【系统指令】：目标位置未揭盲或不可达。请描写找不到出路的场景。';
+          break;
+        case 'no-target':
+          res.isSuccess = false;
+          res.narrativeInstruction = tension === 0
+            ? '【系统强制】：玩家尝试移动但目标位置不可达。请描写路被阻断。'
+            : '【系统指令】：玩家想移动但未指定明确方向。请询问玩家要去哪里。';
+          break;
       }
+      return tension === 0 ? applyDeathHook(res) : applyMilestoneHook(applyDeathHook(res), state);
+    }
+
+    // ─── Tension 0 (非移动) ─────
+    if (tension === 0) {
+      const route = routeTable['default'];
+      const tier = rollToTier(route.probabilities, roll, res);
+      res.newHp = Math.max(0, Math.min(100, state.hp + route.hpDelta[tier]));
+      res.isSuccess = true;
+      res.narrativeInstruction = buildT0Narrative(action, tier, roll, res.newHp);
       return applyDeathHook(res);
     }
 
-    // ─── Tension 1 ─────
-    // BUG3: 探索进度熔断锁 - 在所有 tension 级别下拦截已探索完毕区域
-    if (action === 'explore') {
-      const cbProgressKey = state.currentHouseId
-        ? `house_${state.currentHouseId}`
-        : `node_${state.currentNodeId}`;
-      if ((state.progressMap[cbProgressKey] || 0) >= 100) {
-        res.isSuccess = true;
-        res.narrativeInstruction = '【系统指令】：玩家试图继续探索，但此区域物资和线索已被彻底搜刮殆尽。请结合上下文世界观和角色性格或经历告诉玩家这里已经空了，建议前往其他地方。';
-        return res;
-      }
-    }
-
+    // ─── Tension 1 (非移动) ─────
     if (tension === 1) {
       if (action === 'explore') {
         const route = routeTable['explore'];
@@ -442,59 +483,6 @@ export class D20Resolver {
         res.newTensionLevel = clampTension(tension + route.tensionDelta[adjustedTier]);
         res.isSuccess = adjustedTier > 0;
         res.narrativeInstruction = buildT1ExploreNarrative(adjustedTier, roll, res.newProgressMap[progressKey]);
-      } else if (action === 'move') {
-        const targetId = intent.targetId;
-        if (targetId && currentNode?.connections.includes(targetId)) {
-          if (state.currentHouseId) {
-            // 玩家在建筑内想跨节点移动 → 先退出建筑
-            res.newHouseId = null;
-            res.isSuccess = true;
-            const targetNode = findNode(state, targetId);
-            res.narrativeInstruction = `【系统指令】：玩家走出当前建筑，准备前往【${targetNode?.name || targetId}】。请描写走出建筑来到街区的场景。`;
-          } else {
-            // 跨节点移动 → 进入 transit
-            res.newTransitState = {
-              fromNodeId: state.currentNodeId!,
-              toNodeId: targetId,
-              pathProgress: 0,
-              lockedTheme: null,
-            };
-            res.newHouseId = null;
-            res.isSuccess = true;
-            res.narrativeInstruction = '【系统指令】：玩家踏上旅途，正在赶往新区域。请描写动身离开与旅途初段的见闻。';
-          }
-        } else if (targetId && currentNode) {
-          const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
-          const targetHouse = visibleHouses.find(h => h.id === targetId);
-          if (targetHouse) {
-            // 如果当前在另一个 house 里，需要先出门到野外
-            if (state.currentHouseId && state.currentHouseId !== targetId) {
-              res.newHouseId = null;
-              res.isSuccess = true;
-              // 标记新紧张度：离开安全建筑进入野外，可能提升紧张
-              if (isNodeFullyExplored) {
-                res.newTensionLevel = Math.min(1, tension) as 0 | 1 | 2 | 3 | 4;
-              }
-              res.narrativeInstruction = `【系统指令】：玩家走出当前建筑来到街区野外，正准备前往${targetHouse.name}。请描写走出建筑的场景，暗示接下来要穿过街区。`;
-            } else {
-              res.newHouseId = targetId;
-              res.isSuccess = true;
-              res.narrativeInstruction = `【系统指令】：玩家进入${targetHouse.name}。请描写进入该建筑的场景。`;
-            }
-          } else {
-            res.isSuccess = false;
-            res.narrativeInstruction = '【系统指令】：目标位置未揭盲或不可达。请描写找不到出路的场景。';
-          }
-        } else {
-          if (state.currentHouseId) {
-            res.newHouseId = null;
-            res.isSuccess = true;
-            res.narrativeInstruction = '【系统指令】：玩家退出当前建筑，回到街区野外。请描写走出建筑的场景。';
-          } else {
-            res.isSuccess = false;
-            res.narrativeInstruction = '【系统指令】：玩家想移动但未指定明确方向。请询问玩家要去哪里。';
-          }
-        }
       } else {
         // combat / other in T1
         const route = routeTable['combat'] || routeTable['default'];
@@ -509,51 +497,41 @@ export class D20Resolver {
     // ─── Tension 2 ─────
     if (tension === 2) {
       if (action === 'move') {
-        // T2 撤退逃亡检定：过 D20 后执行实际位置变更
         const route = routeTable['move'];
         const tier = rollToTier(route.probabilities, roll, res);
         res.newHp = Math.max(0, Math.min(100, state.hp + route.hpDelta[tier]));
         res.newTensionLevel = clampTension(tension + route.tensionDelta[tier]);
         res.isSuccess = true;
 
-        const targetId = intent.targetId;
-        if (targetId && currentNode?.connections.includes(targetId)) {
-          const targetNode = findNode(state, targetId);
-          const targetName = targetNode?.name || targetId;
-          if (state.currentHouseId) {
-            // 玩家在建筑内想跨节点撤退 → 先冲出建筑
-            res.newHouseId = null;
-            res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲出当前建筑，准备朝【${targetName}】方向撤离！Roll=${roll}，请描写冲出建筑的过程。`;
-          } else {
-            // 跨节点撤退 → 创建 transit
-            res.newTransitState = {
-              fromNodeId: state.currentNodeId!,
-              toNodeId: targetId,
-              pathProgress: 5, // 战术撤退已走一半
-              lockedTheme: null,
-            };
-            res.newHouseId = null;
-            res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家朝【${targetName}】方向有序撤出！紧张度降回 1 级。Roll=${roll}，请描写安全撤离危机区域并踏上旅途的过程。`;
-          }
-        } else if (targetId && currentNode) {
-          const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
-          const targetHouse = visibleHouses.find(h => h.id === targetId);
-          if (targetHouse) {
-            if (state.currentHouseId && state.currentHouseId !== targetId) {
+        const mt = resolveMoveTarget(state, intent, currentNode);
+        switch (mt.type) {
+          case 'cross-node':
+            if (mt.fromBuilding) {
               res.newHouseId = null;
-              res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲出当前建筑来到街区！紧张度降回 1 级。Roll=${roll}，请描写逃出建筑的过程。`;
+              res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲出当前建筑，准备朝【${mt.targetName}】方向撤离！Roll=${roll}，请描写冲出建筑的过程。`;
             } else {
-              res.newHouseId = targetId;
-              res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲入【${targetHouse.name}】躲避！紧张度降回 1 级。Roll=${roll}，请描写逃入建筑的过程。`;
+              res.newTransitState = {
+                fromNodeId: state.currentNodeId!,
+                toNodeId: mt.targetNodeId,
+                pathProgress: 5,
+                lockedTheme: null,
+              };
+              res.newHouseId = null;
+              res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家朝【${mt.targetName}】方向有序撤出！紧张度降回 1 级。Roll=${roll}，请描写安全撤离危机区域并踏上旅途的过程。`;
             }
-          } else {
+            break;
+          case 'enter-house':
+            res.newHouseId = mt.house.id;
+            res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲入【${mt.house.name}】躲避！紧张度降回 1 级。Roll=${roll}，请描写逃入建筑的过程。`;
+            break;
+          case 'exit-to-house':
+          case 'exit-building':
+            res.newHouseId = null;
+            res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲出建筑逃到街区！紧张度降回 1 级。Roll=${roll}，请描写逃出建筑的过程。`;
+            break;
+          default:
             res.narrativeInstruction = buildT2Narrative(action, tier, roll, res.newHp);
-          }
-        } else if (!targetId && state.currentHouseId) {
-          res.newHouseId = null;
-          res.narrativeInstruction = `【系统强制 - 战术撤退】：玩家冲出建筑逃到街区！紧张度降回 1 级。Roll=${roll}，请描写逃出建筑的过程。`;
-        } else {
-          res.narrativeInstruction = buildT2Narrative(action, tier, roll, res.newHp);
+            break;
         }
         return applyDeathHook(res);
       }
@@ -572,8 +550,6 @@ export class D20Resolver {
     // ─── Tension 3 ─────
     if (tension === 3) {
       if (action === 'move') {
-        const targetId = intent.targetId;
-
         // 如果玩家在建筑内，不管目标是什么，第一步都是先冲出建筑
         if (state.currentHouseId) {
           const route = routeTable['move'];
@@ -591,33 +567,20 @@ export class D20Resolver {
             res.narrativeInstruction = `【系统指令 - 破门而出】：玩家拼命冲出了建筑来到街区！Roll=${roll}，请描写慌不择路冲出建筑的惊险场面。`;
           }
         } else {
-          // 玩家已在野外，正常逃跑逻辑
-          let canMove = false;
-          let nextNodeId = state.currentNodeId;
-          let targetName = '安全地带';
-
-          if (targetId && currentNode?.connections.includes(targetId)) {
-            canMove = true;
-            nextNodeId = targetId;
-            targetName = '相邻区域';
-          } else if (targetId && currentNode) {
-            const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
-            const targetHouse = visibleHouses.find(h => h.id === targetId);
-            if (targetHouse) {
-              canMove = true;
-              nextNodeId = state.currentNodeId;
-              targetName = targetHouse.name;
-            }
-          } else if (!targetId) {
-            // 无目标但在野外，视为随机逃窜
-            canMove = false;
-          }
+          // 玩家已在野外，使用 resolveMoveTarget 解析目标
+          const mt = resolveMoveTarget(state, intent, currentNode);
+          const canMove = mt.type === 'cross-node' || mt.type === 'enter-house' || mt.type === 'exit-to-house';
 
           if (!canMove) {
             res.newHp -= 20;
             res.isSuccess = false;
             res.narrativeInstruction = `【系统指令 - 慌不择路】：试图逃跑，却在恐慌中冲向了死胡同或无法到达的区域！遭到敌人背后猛击，HP-20（当前${res.newHp}）。被逼回原地，维持 3 级紧张度。`;
           } else {
+            const nextNodeId = mt.type === 'cross-node' ? mt.targetNodeId : state.currentNodeId;
+            const targetName = mt.type === 'cross-node' ? mt.targetName
+              : (mt.type === 'enter-house' || mt.type === 'exit-to-house') ? mt.house.name
+              : '安全地带';
+
             const route = routeTable['move'];
             const tier = rollToTier(route.probabilities, roll, res);
             res.newHp = Math.max(0, Math.min(100, state.hp + route.hpDelta[tier]));
@@ -625,7 +588,6 @@ export class D20Resolver {
             res.isSuccess = tier === 2;
 
             if (tier === 2) {
-              // 大成功：转变为 transit 而非瞬移
               res.newTransitState = {
                 fromNodeId: state.currentNodeId!,
                 toNodeId: nextNodeId!,
