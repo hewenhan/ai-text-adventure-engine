@@ -255,8 +255,35 @@ export function useChatLogic() {
       }
 
       // ── Step 2: Pipeline State Machine Resolution ──
-      const d20 = Math.floor(Math.random() * 20) + 1;
+      const debugOv = state.debugOverrides;
+      const d20 = debugOv?.forcedRoll ?? (Math.floor(Math.random() * 20) + 1);
       const resolution = runPipeline(resolveState, intent, d20);
+
+      // ── Step 2.5: Debug 覆写（管线后、状态写入前一次性消费） ──
+      if (debugOv) {
+        if (debugOv.tensionLevel !== undefined) {
+          resolution.tensionChanged = resolution.newTensionLevel !== debugOv.tensionLevel;
+          resolution.newTensionLevel = debugOv.tensionLevel;
+        }
+        if (debugOv.hp !== undefined) resolution.newHp = Math.max(0, Math.min(100, debugOv.hp));
+        if (debugOv.lives !== undefined) resolution.newLives = Math.max(0, debugOv.lives);
+        if (debugOv.teleportNodeId) {
+          resolution.newNodeId = debugOv.teleportNodeId;
+          resolution.newHouseId = debugOv.teleportHouseId ?? null;
+          resolution.newTransitState = null; // 传送时清除赶路
+        }
+        if (debugOv.progressOverride) {
+          resolution.newProgressMap = { ...resolution.newProgressMap, [debugOv.progressOverride.key]: Math.max(0, Math.min(100, debugOv.progressOverride.value)) };
+        }
+        if (debugOv.forceGameOver) {
+          resolution.newIsGameOver = true;
+          resolution.newHp = 0;
+          resolution.newLives = 0;
+        }
+        console.log('[DEBUG] Overrides applied:', debugOv);
+        // 清除覆写，仅生效一次
+        updateState({ debugOverrides: undefined });
+      }
 
       // 如果导演系统有叙事覆盖，替换 resolution 的 narrativeInstruction
       if (directorNarrativeOverride) {
@@ -314,6 +341,13 @@ export function useChatLogic() {
           }
         };
       });
+
+      // ── Debug 覆写：直接写 GameState 的字段（任务/好感度） ──
+      if (debugOv) {
+        if (debugOv.forceQuest) updateState({ currentObjective: debugOv.forceQuest });
+        if (debugOv.clearQuest) updateState({ currentObjective: null });
+        if (debugOv.affection !== undefined) updateState({ affection: Math.max(0, Math.min(100, debugOv.affection)) });
+      }
 
       // ── Location Discovery Notification (deferred) ──
       const pendingNotifications: Omit<GrandNotificationData, 'id'>[] = [];

@@ -1,0 +1,792 @@
+commit 19ac96aa8d673db19bd11d17dcd2b1e0149aa8db
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 15:15:16 2026 +0800
+
+    重命名：pipeline 步骤文件改为 3 位编号、20 号一跳（020-200），方便插入新步骤
+
+ .../{01_progressCalc.ts => 020_progressCalc.ts}      |  0
+ src/lib/pipeline/{02_d20Roll.ts => 040_d20Roll.ts}   |  0
+ ...3_behaviorOverride.ts => 060_behaviorOverride.ts} |  0
+ .../{04_moveResolve.ts => 080_moveResolve.ts}        |  0
+ .../{05_tensionDelta.ts => 100_tensionDelta.ts}      |  0
+ ...6_safeZoneOverride.ts => 120_safeZoneOverride.ts} |  0
+ .../pipeline/{07_milestone.ts => 140_milestone.ts}   |  0
+ .../{08_hpSettlement.ts => 160_hpSettlement.ts}      |  0
+ ...{09_deathSettlement.ts => 180_deathSettlement.ts} |  0
+ ...{10_bgmAndNarrative.ts => 200_bgmAndNarrative.ts} |  0
+ src/lib/pipeline/runPipeline.ts                      | 20 ++++++++++----------
+ 11 files changed, 10 insertions(+), 10 deletions(-)
+
+commit 6586d4bd0d32a18c3fa67c3e4a3ffc7a0bedaaf2
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 15:12:45 2026 +0800
+
+    清理：删除已废弃的 D20Resolver.ts（逻辑已迁移至 pipeline/）
+
+ src/lib/D20Resolver.ts | 727 -------------------------------------------------
+ 1 file changed, 727 deletions(-)
+
+commit b0de737aeb407d192d44052eab6d45a2176203f6
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 15:11:22 2026 +0800
+
+    重构：D20 状态机拆分为 10 步 pipeline 架构
+    
+    - 新建 src/lib/pipeline/ 目录，拆分为 10 个独立步骤：
+      01_progressCalc → 02_d20Roll → 03_behaviorOverride → 04_moveResolve
+      → 05_tensionDelta → 06_safeZoneOverride → 07_milestone
+      → 08_hpSettlement → 09_deathSettlement → 10_bgmAndNarrative
+    - 修复 Bug#1：离开安全建筑后紧张度未重算（step06 安全区覆写）
+    - 修复 Bug#2：BGM 不切换（移除 useChatLogic 中对 state 的直接变异）
+    - 修复 Bug#3：死亡不撤离已满区域（step09 死亡撤离逻辑）
+    - 修复：100% 区域 explore 大失败不再误触里程碑（step03 行为覆写）
+    - useChatLogic 改为调用 runPipeline()，移除重复空间辅助函数和内联 BGM 选曲逻辑
+    - 旧 D20Resolver.ts 暂保留，不再被引用
+
+ src/hooks/useChatLogic.ts               |  91 ++---------
+ src/lib/pipeline/01_progressCalc.ts     |  34 ++++
+ src/lib/pipeline/02_d20Roll.ts          | 122 +++++++++++++++
+ src/lib/pipeline/03_behaviorOverride.ts |  29 ++++
+ src/lib/pipeline/04_moveResolve.ts      | 268 ++++++++++++++++++++++++++++++++
+ src/lib/pipeline/05_tensionDelta.ts     |  57 +++++++
+ src/lib/pipeline/06_safeZoneOverride.ts |  64 ++++++++
+ src/lib/pipeline/07_milestone.ts        |  38 +++++
+ src/lib/pipeline/08_hpSettlement.ts     |  73 +++++++++
+ src/lib/pipeline/09_deathSettlement.ts  |  75 +++++++++
+ src/lib/pipeline/10_bgmAndNarrative.ts  | 214 +++++++++++++++++++++++++
+ src/lib/pipeline/helpers.ts             |  72 +++++++++
+ src/lib/pipeline/index.ts               |   7 +
+ src/lib/pipeline/narratives.ts          | 169 ++++++++++++++++++++
+ src/lib/pipeline/runPipeline.ts         | 150 ++++++++++++++++++
+ src/lib/pipeline/types.ts               | 123 +++++++++++++++
+ 16 files changed, 1504 insertions(+), 82 deletions(-)
+
+commit 5ef0b5c316646dab7bc134fe26b951f628fe1183
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 13:10:26 2026 +0800
+
+    重构消息显示时序：用打字机完成信号替代按字数估算的阅读延迟
+
+ src/hooks/useChatLogic.ts | 38 ++++++++++++++++++++++++++++++--------
+ 1 file changed, 30 insertions(+), 8 deletions(-)
+
+commit 17c379a5aed5397334cb4a0aa6f184d20a4302d5
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 12:19:19 2026 +0800
+
+    重构: 提取存档迁移函数消除重复代码，修复ProfileModal类型引用，D20Resolver移动逻辑合并
+
+ src/components/ProfileModal.tsx |  10 +-
+ src/contexts/GameContext.tsx    |  87 ++++-------
+ src/lib/D20Resolver.ts          | 310 ++++++++++++++++++----------------------
+ src/services/aiService.ts       | 143 ------------------
+ 4 files changed, 171 insertions(+), 379 deletions(-)
+
+commit 9c4ce05adb4b4659cc5758c7e50d4d9e1b103354
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 08:45:06 2026 +0800
+
+    FIX: 修复好感度修正bug
+
+ src/lib/D20Resolver.ts | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+commit 31e70c8ffe9446093dd32abe207cd91c2da5ecd9
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 04:44:21 2026 +0800
+
+    feat: 添加BFS宏观寻路系统，修复T0无法进入建筑的bug，添加建筑揭盲通知
+
+ src/hooks/useChatLogic.ts | 37 +++++++++++++++++---
+ src/lib/D20Resolver.ts    | 24 +++++++++++--
+ src/services/aiService.ts | 88 ++++++++++++++++++++++++++++++++++++++++++-----
+ 3 files changed, 134 insertions(+), 15 deletions(-)
+
+commit cfa6c574c747b5344fa19b527b4b73179106643d
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 03:07:14 2026 +0800
+
+    refactor: 重构意图分类器提示词，优化旅途状态隔离与物理动作判定逻辑
+
+ src/services/aiService.ts | 75 ++++++++++++++++++++++++++---------------------
+ 1 file changed, 41 insertions(+), 34 deletions(-)
+
+commit caf250d3a8ba4cbd93d1d43ff74d96a051d65e7c
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 01:56:12 2026 +0800
+
+    fix: 修复所有tension级别从屋内移动时缺少先退出建筑的判定
+
+ src/lib/D20Resolver.ts | 179 ++++++++++++++++++++++++++++++-------------------
+ 1 file changed, 110 insertions(+), 69 deletions(-)
+
+commit a76ea7f6964bf3723fd64bc69f1229ff0f86d9b4
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 01:44:55 2026 +0800
+
+    FIX: 字典调整
+
+ src/components/StatusSidebar.tsx |   4 +-
+ src/lib/gemini.ts                |   2 +-
+ src/pages/Chat.tsx               | 141 +++++++++++++++------------------------
+ src/services/aiService.ts        | 139 ++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 195 insertions(+), 91 deletions(-)
+
+commit aae49706f6f61f89340d4ded9f3fdefd6887d700
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Sat Mar 14 01:17:28 2026 +0800
+
+    FIX: 提示词调整
+
+ src/hooks/useChatLogic.ts | 16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+commit 89645b617a73cf4a70f40351b126ef0a70366868
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Fri Mar 13 23:04:39 2026 +0800
+
+    重构: 统一角色数据模型，修复侧边栏显示与提示词传参缺漏
+    
+    - 合并 CharacterProfile/PlayerProfile/AICharacterSetup 为统一 CharacterProfile
+    - GameState 改用 playerProfile + companionProfile 替代旧字段
+    - aiService: 合并两个 fleshOut 函数为统一 fleshOutProfile
+    - Chat.tsx: 更新丰富化逻辑，移除旧字段引用
+    - StatusSidebar: 修复性别中文翻译，补全同伴/玩家所有档案字段
+    - useChatLogic: 补全同伴角色串(age/orientation/外貌等)和玩家档案(年龄/外貌/性格/特长等)
+    - GameContext: 添加旧存档迁移逻辑(characterSettings+aiCharacterSetup→companionProfile)
+    - Setup.tsx: 表单使用 INIT_PLAYER_PROFILE/INIT_COMPANION_PROFILE 默认值
+
+ src/components/StatusSidebar.tsx |  38 +++++---
+ src/contexts/GameContext.tsx     |  69 +++++++++++++-
+ src/hooks/useChatLogic.ts        |  53 +++++++----
+ src/pages/Chat.tsx               |  80 ++++++----------
+ src/pages/Setup.tsx              | 191 +++++++++++----------------------------
+ src/services/aiService.ts        | 129 ++++++++------------------
+ src/types/game.ts                |  80 +++++++---------
+ 7 files changed, 278 insertions(+), 362 deletions(-)
+
+commit 7307b84479e03cc759e6c073552c598df2e00de2
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Fri Mar 13 20:27:00 2026 +0800
+
+    FIX: 移动端适配修复
+
+ index.html                         |   2 +-
+ src/components/ChatInput.tsx       |   2 +-
+ src/components/ChatMessageItem.tsx |  17 +--
+ src/components/StatusSidebar.tsx   |   2 +-
+ src/pages/Chat.tsx                 | 260 +++++++++++++++++++++++++------------
+ 5 files changed, 190 insertions(+), 93 deletions(-)
+
+commit 3eb0998cb7f41c9af5eadb5b58eb5be65146b78d
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Fri Mar 13 19:12:23 2026 +0800
+
+    fix: 人物角色数据类型调整
+
+ src/pages/Setup.tsx | 59 +++++++++++++++++++++++++----------------------------
+ 1 file changed, 28 insertions(+), 31 deletions(-)
+
+commit 1c58075ed8c2631d32eeb5726b5a37423afbb2f3
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Fri Mar 13 16:48:30 2026 +0800
+
+    FIX: 意图判断确实 h.id 修复；出图角色融合修复
+
+ src/services/aiService.ts | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+commit 8ce38e407f8e396618c0fb05e4f86cd33d72ffea
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Fri Mar 13 10:00:38 2026 +0800
+
+    FIX: 调整对话用 prompt
+
+ src/components/StatusSidebar.tsx |  6 ++--
+ src/hooks/useChatLogic.ts        | 59 ++++++++++++++++++++++------------------
+ src/lib/D20Resolver.ts           |  2 +-
+ 3 files changed, 37 insertions(+), 30 deletions(-)
+
+commit 5bbfe1f449d57f29a7648d460d774d08e0d2ed94
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Fri Mar 13 02:58:03 2026 +0800
+
+    FIX: Intent 机制优化
+
+ src/services/aiService.ts | 83 ++++++++++++++++++++++++++++-------------------
+ 1 file changed, 49 insertions(+), 34 deletions(-)
+
+commit 6994819bbeee58a1b2df71ee1696dc046c25a45e
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Fri Mar 13 02:34:16 2026 +0800
+
+    修复旅途系统：分级处理 T2/T3/T4 transit + 意图 AI 判定掉头方向
+    
+    1. resolveTransit 按 tension 分级（T2/T3/T4 各自概率、扣血、紧张度变化）
+       - T2: [0.15,0.65,0.20] HP-5
+       - T3: [0.30,0.60,0.10] HP-15
+       - T4: [0.50,0.40,0.10] HP-25
+    
+    2. buildTransitNarrative 新增 T3（精英追击）和 T4（死斗追击）专属叙事
+    
+    3. IntentResult 新增 direction?: 'forward' | 'back' 字段
+       extractIntent 接收 transitInfo 参数，在旅途中注入上下文让 AI 判定方向
+    
+    4. useChatLogic 移除正则 hack，改用 intent.direction === 'back' 判定掉头
+       掉头时清除 lockedTheme 并注入返程叙事指令
+
+ src/hooks/useChatLogic.ts |  37 +++++++++++++-
+ src/lib/D20Resolver.ts    | 124 ++++++++++++++++++++++++++++++++++++++++------
+ src/services/aiService.ts |  21 +++++---
+ src/types/game.ts         |   1 +
+ 4 files changed, 159 insertions(+), 24 deletions(-)
+
+commit bf6ab9fb4cd90239995637ad3525cbdd9faa7793
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Fri Mar 13 00:35:32 2026 +0800
+
+    Phase 2: 好感度系统 + UI 优化
+    
+    - 好感度系统: AI 生成初始好感度, D20 掷骰好感度修正(援助/落井下石), AI 每回合输出 affection_change
+    - 好感度 UI: Header 心形图标+数值, 浮动动画(+N/-N), 聊天区大号好感变动动画, 侧栏进度条+关系描述
+    - Header 音量控件: 移至顶部, hover 弹出水平滑条, 点击静音/取消静音
+    - Header 文字速度: 移至顶部, 循环切换 1x/2x/∞
+    - ChatInput 精简: 仅保留输入框+发送按钮
+    - FloatingObjective: 从 fixed 改为 absolute, 拖拽限制在聊天区容器内
+    - Debug 面板: 新增好感度显示, 检定公式展示(含好感度修正计算全过程)
+    - D20Resolver 重构: resolve/resolveInner 拆分, rollToTier 输出公式, applyAffectionModifier 输出详细计算过程
+    - System Prompt: 新增规则3(禁止话痨向导), 规则4(像真人说话), 好感度上下文注入
+    - 存档兼容: GameContext 迁移支持 affection 字段
+
+ src/components/ChatInput.tsx         | 216 ++++-------------------------------
+ src/components/DebugOverlay.tsx      |  17 +++
+ src/components/FloatingObjective.tsx |  39 +------
+ src/components/StatusSidebar.tsx     |  26 +++++
+ src/contexts/GameContext.tsx         |   3 +
+ src/hooks/useChatLogic.ts            |  46 ++++++--
+ src/lib/D20Resolver.ts               |  86 +++++++++++---
+ src/pages/Chat.tsx                   | 136 +++++++++++++++++++++-
+ src/services/aiService.ts            |   6 +-
+ src/types/game.ts                    |  10 +-
+ 10 files changed, 329 insertions(+), 256 deletions(-)
+
+commit 7243ee4612dd732848ad46a81b28afd950473470
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Thu Mar 12 07:20:04 2026 +0800
+
+    feat: Phase 1 全面优化 — Setup 向导、首页、浮动目标、角色系统重构
+    
+    - Setup 向导：年龄/肤色/身高/体型改为下拉选择，姓名可留空由 AI 补全
+    - Setup 向导：AI 角色性别改为按钮选择，性取向改为下拉（含随机选项）
+    - Setup 向导：特长、兴趣、厌恶拆为三个独立输入字段
+    - 首页：移除旧角色设定表单，新增友好的游戏特色介绍卡片
+    - 首页：开始新游戏不再预写 characterSettings，由 Setup 流程统一处理
+    - 聊天输入框：textarea 自动扩展，未溢出时隐藏滚动条
+    - 浮动目标：改为 fixed 定位 + z-20，不再被聊天框遮挡
+    - z-index 层级统一：z-10 Header → z-20 浮动目标 → z-30/40 侧边栏 → z-50 模态框
+    - 返回首页按钮：只导航不清空游戏状态
+    - CharacterProfile 新增 specialties/dislikes 字段
+    - AICharacterSetup 新增 specialties 字段，hobbies/dislikes 分离
+    - AI 角色补全 prompt 要求分别生成特长/爱好/厌恶并返回
+    - 新增 fleshOutPlayerProfile：自动补全玩家姓名/发型/发色/性格
+    - 状态侧边栏：展示 AI 角色特长/爱好/厌恶 + 玩家完整档案
+    - useChatLogic 叙事 prompt 传入特长/爱好/厌恶三字段
+
+ src/components/ChatInput.tsx         |  25 ++-
+ src/components/FloatingObjective.tsx |  35 +++-
+ src/components/StatusSidebar.tsx     |  30 ++-
+ src/contexts/GameContext.tsx         |   1 +
+ src/hooks/useChatLogic.ts            |  17 +-
+ src/pages/Chat.tsx                   |  56 +++++-
+ src/pages/Home.tsx                   | 134 ++++---------
+ src/pages/Setup.tsx                  | 368 ++++++++++++++++++++++++++++++-----
+ src/services/aiService.ts            | 112 +++++++++--
+ src/types/game.ts                    |  30 +++
+ 10 files changed, 636 insertions(+), 172 deletions(-)
+
+commit 11eee138a21f34296a48bc6833ea22a7e95c903c
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Thu Mar 12 05:31:01 2026 +0800
+
+    update
+
+ src/hooks/useChatLogic.ts | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+commit 84ef6e505c96c512be69be454d1b22c5e25c04e0
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Thu Mar 12 01:52:33 2026 +0800
+
+    feat: 文档重写
+
+ README.md | 217 +++++++++++++++++++++++++++++++++++++++++++++++---------------
+ 1 file changed, 165 insertions(+), 52 deletions(-)
+
+commit 8472591f3f7073bf8b3f79deba5efc547b54fe92
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Thu Mar 12 01:20:23 2026 +0800
+
+    feat: 更新文档
+
+ README.md          | 10 +++++-----
+ index.html         |  8 ++++++--
+ src/App.tsx        |  6 ++++++
+ src/lib/appMeta.ts |  3 +++
+ src/pages/Home.tsx |  6 ++++--
+ 5 files changed, 24 insertions(+), 9 deletions(-)
+
+commit 63d7b0d4cc152abb184906a6a8e22f3172fe530a
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Wed Mar 11 23:22:11 2026 +0800
+
+    FEAT: 更新游戏 BGM
+
+ public/levelBGM/Level1_1.mp3 | Bin 5194315 -> 3290983 bytes
+ public/levelBGM/Level1_2.mp3 | Bin 5179679 -> 4918529 bytes
+ public/levelBGM/Level1_3.mp3 | Bin 5831608 -> 5385818 bytes
+ public/levelBGM/Level1_4.mp3 | Bin 4298204 -> 6321690 bytes
+ 4 files changed, 0 insertions(+), 0 deletions(-)
+
+commit a698c4336efbf888f39e5dce5fd8c6fa2b8e1008
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Wed Mar 11 22:43:46 2026 +0800
+
+    修复多项BUG及功能增强
+    
+    BUG修复:
+    - 修复D20Resolver探索/战斗/RP死亡判定逻辑
+    - 修复赶路过程过于啰嗦问题，禁止赶路中提议战术行动方案
+    - 修复赶路紧张度过高问题，和平赶路使用独立概率表
+    - 修复节点单向连接问题，添加normalizeConnections双向化
+    - 修复领取任务后目标地点未揭盲，任务+发现通知依次入队列
+    - 修复图片放大后拖拽边界未随缩放更新
+    
+    新功能:
+    - 地图新增TopologyGraph路线连接图(SVG)，标示节点间连接关系
+    - 图片查看器支持鼠标滚轮缩放和移动端双指缩放(ZoomableImage组件)
+    - 打字机动画组件(TypewriterMessage)，rAF驱动+Virtuoso防重播
+    - 华丽任务/发现通知队列系统(GrandNotification)
+    - 浮动任务目标显示(FloatingObjective)
+    - 探索进度追踪器(ProgressTracker)
+    - 动态记忆锁防止旅途主题重复
+    - worldviewUserInput保留用户原始世界观描述
+
+ src/components/ChatInput.tsx         |  37 ++++++-
+ src/components/ChatMessageItem.tsx   | 104 +++++------------
+ src/components/FloatingObjective.tsx |  27 +++++
+ src/components/GrandNotification.tsx |  24 ++--
+ src/components/MapOverlay.tsx        | 209 ++++++++++++++++++++++++++++-------
+ src/components/ProgressTracker.tsx   |  56 ++++++++++
+ src/components/TypewriterMessage.tsx | 168 ++++++++++++++++++++++++++++
+ src/components/ZoomableImage.tsx     | 123 +++++++++++++++++++++
+ src/contexts/GameContext.tsx         |  14 ++-
+ src/hooks/useChatLogic.ts            | 135 ++++++++++++++++++----
+ src/index.css                        |  17 +++
+ src/lib/D20Resolver.ts               |  86 ++++++++++++--
+ src/pages/Chat.tsx                   |  62 ++++++++---
+ src/pages/Home.tsx                   |   1 +
+ src/pages/Setup.tsx                  |   2 +
+ src/services/aiService.ts            |  28 ++++-
+ src/types/game.ts                    |  28 +++++
+ 17 files changed, 933 insertions(+), 188 deletions(-)
+
+commit 866362cf5c93ab5fc0d35f1f32e35db39d1147da
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Wed Mar 11 03:16:48 2026 +0800
+
+    feat: 新增游戏功能增强 (进度条优化, 艺术风格选择, 头像全屏, 系统扩展, 大型通知)
+
+ src/App.tsx                           |  15 +-
+ src/components/ArtStylePicker.tsx     |  95 +++++++++++
+ src/components/ChatMessageItem.tsx    |  43 ++++-
+ src/components/FakeProgressBar.tsx    | 286 ++++++++++++++++++++++++++++++++++
+ src/components/FleshingOutOverlay.tsx |  35 ++++-
+ src/components/GrandNotification.tsx  | 252 ++++++++++++++++++++++++++++++
+ src/components/StatusSidebar.tsx      |  18 ++-
+ src/hooks/useChatLogic.ts             |  81 ++++++++--
+ src/lib/D20Resolver.ts                |  59 ++++++-
+ src/main.tsx                          |   4 +-
+ src/pages/Chat.tsx                    |  24 ++-
+ src/pages/Setup.tsx                   | 105 ++++++++++---
+ src/services/aiService.ts             |  11 +-
+ src/types/artStyles.ts                |  38 +++++
+ 14 files changed, 992 insertions(+), 74 deletions(-)
+
+commit c6cf44f26a10f921f5f49ff3b97f9831def9e3f1
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 23:35:32 2026 +0800
+
+    feat: 世界观生成时自动产出画风提词，统一全局生图风格
+    
+    - GameState 新增 artStylePrompt 字段，存储世界观对应的画风描述
+    - generateWorldData 提示词增加画风生成任务，返回 artStylePrompt
+    - generateMapImage / generateCharacterPortrait / generateImage 均接受
+      artStylePrompt 参数，作为 MANDATORY ART STYLE 注入图片 prompt
+    - Chat.tsx 在世界生成后保存 artStylePrompt，并传递给地图和头像生成
+    - useChatLogic 聊天场景图片生成同样注入画风提词
+    - GameContext 存档迁移兼容 artStylePrompt 字段（旧存档默认空字符串）
+
+ src/components/ChatMessageItem.tsx | 13 ++++--
+ src/components/MapOverlay.tsx      | 29 ++++++++++---
+ src/components/StatusSidebar.tsx   | 22 ++++++++++
+ src/contexts/GameContext.tsx       | 11 +++--
+ src/hooks/useChatLogic.ts          | 28 +++++++++++--
+ src/lib/gemini.ts                  |  3 +-
+ src/pages/Chat.tsx                 | 73 +++++++++++++++++++++++++++------
+ src/services/aiService.ts          | 84 ++++++++++++++++++++++++++++++++++----
+ src/types/game.ts                  | 19 +++++++--
+ 9 files changed, 243 insertions(+), 39 deletions(-)
+
+commit 9529cb609cb97e33510a23d7051ad693ebf9577e
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 22:14:36 2026 +0800
+
+    feat 常驻现实 drive 连接状态
+
+ src/components/DriveToast.tsx | 50 +++++++++++++++++++++++++++++++++++++++++++
+ src/contexts/AuthContext.tsx  | 18 ++++++++++++++--
+ src/pages/Chat.tsx            | 41 +++++++++++++++++++++++++++++++----
+ 3 files changed, 103 insertions(+), 6 deletions(-)
+
+commit 6a5633b718f3090017726c2e82edb8797fbdc088
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 21:30:53 2026 +0800
+
+    回滚代码
+
+ README.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+commit 6921e5510eaad5c96e32c1c0e0b82193f7b7cae3
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 20:35:08 2026 +0800
+
+    docs: rewrite README with new game features and sales copy
+
+ README.md | 110 +++++++++++++++++++++++++++++++++++---------------------------
+ 1 file changed, 62 insertions(+), 48 deletions(-)
+
+commit d195f56a617714e30b6fa7dab08f7e994951b698
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 20:22:36 2026 +0800
+
+    feat: 重构 D20 结算引擎并新增旅途系统 (Phase 1-4)
+    
+    本次重构大幅调整了底层逻辑与界面表现，旨在解决“瞬移”问题和提升状态反馈的沉浸感。
+    
+    主要变更：
+    1. **D20 引擎重构 (Phase 1)**
+       - 将臃肿的 `resolveD20` 拆分为 `src/lib/D20Resolver.ts` (逻辑核心) 和 `src/lib/tensionConfig.ts` (数据配置)。
+       - 引入百分比概率表 (大失败/普通/大成功)，替代硬编码的数值判断。
+    
+    2. **旅途系统与状态机升级 (Phase 2 & 3)**
+       - `GameState` 新增 `transitState` 字段，跨节点移动不再瞬移，需积累路程进度。
+       - `useChatLogic` 系统提示词深度优化，精确注入 “荒野赶路 / 室内搜刮 / 街区野外” 三种不同的环境上下文。
+       - 解决了 LLM 对“探索进度”含义混淆的问题，明确区分“赶路进度”与“搜刮进度”。
+    
+    3. **地图与 UI 视觉增强 (Phase 4)**
+       - `MapOverlay` 新增顶部“赶路状态横幅”，可视化展示出发地、目的地与当前进度。
+       - 建筑卡片新增迷你进度条，直观反映室内探索程度。
+       - 聊天气泡的调试删除按钮改为仅 Hover 时显示，减少视觉干扰。
+    
+    4. **数据迁移**
+       - 更新 `GameContext` 版本迁移逻辑，兼容旧存档并自动初始化 `transitState`。
+
+ src/components/ChatMessageItem.tsx |   2 +-
+ src/components/MapOverlay.tsx      |  51 ++++-
+ src/contexts/GameContext.tsx       |   3 +-
+ src/hooks/useChatLogic.ts          | 395 ++++----------------------------
+ src/lib/D20Resolver.ts             | 451 +++++++++++++++++++++++++++++++++++++
+ src/lib/tensionConfig.ts           | 204 +++++++++++++++++
+ src/types/game.ts                  |   8 +
+ 7 files changed, 751 insertions(+), 363 deletions(-)
+
+commit 87c4203803907e221267373855a6e74bee8fecb3
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 15:37:56 2026 +0800
+
+    fix: 游戏规则若干修改
+
+ src/hooks/useBGM.ts       |   6 +--
+ src/hooks/useChatLogic.ts | 121 ++++++++++++++++++++++++++++------------------
+ src/services/aiService.ts |  43 +++++++++++++++-
+ 3 files changed, 118 insertions(+), 52 deletions(-)
+
+commit 72786edad3c619a43e25a5eec995b0e387bd2703
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 14:38:21 2026 +0800
+
+    fix: 游戏规则若干修改
+
+ src/components/ChatMessageItem.tsx |  10 +-
+ src/components/StatusSidebar.tsx   |  37 +++++-
+ src/contexts/GameContext.tsx       |   7 +-
+ src/hooks/useChatLogic.ts          | 237 ++++++++++++++++++++++++++-----------
+ src/services/aiService.ts          |  56 +++++++--
+ src/types/game.ts                  |  14 ++-
+ 6 files changed, 270 insertions(+), 91 deletions(-)
+
+commit 4476a961dfd647c55e76b5949d78c039b3e4f25e
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 10:34:17 2026 +0800
+
+    fix: 修复地图显示bug
+
+ src/components/MapOverlay.tsx | 138 ++++++++++++++++++++++++++++++------------
+ 1 file changed, 99 insertions(+), 39 deletions(-)
+
+commit 88a20742081c46b6fee75e4c6edca4c53a0d4958
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 09:12:07 2026 +0800
+
+    fix: 修复模型调用 BGM 以及地图生成问题
+
+ src/components/MapOverlay.tsx | 194 ++++++++++++++++++++++++++++++++++++++++++
+ src/hooks/useChatLogic.ts     |   7 ++
+ src/lib/gemini.ts             |   5 +-
+ src/pages/Chat.tsx            |  27 +++++-
+ src/pages/Setup.tsx           |   4 +-
+ src/services/aiService.ts     |  54 +++++++++++-
+ 6 files changed, 282 insertions(+), 9 deletions(-)
+
+commit ea2ea33a8626c116d269060aa5af8a454ab7975e
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 07:47:00 2026 +0800
+
+    refactor: 重构核心引擎，剥夺 LLM 裁判权，前端 TS 接管全部状态判定
+    
+    根据 gameSystem.md v2.0 宪法完成以下重构：
+    
+    【模块一：空间拓扑数据库】
+    - 新增 WorldData/NodeData/HouseData 类型体系（4x4 枚举: NodeType/HouseType/SafetyLevel）
+    - 实现揭盲机制：基于 progressMap 的 O(1) 局部视野注入，未揭盲建筑绝不泄露给 LLM
+    
+    【模块二：GameState 重构】
+    - 新增 hp/lives/isGameOver 生存数值，inventory 显式化
+    - 新增 worldData/currentNodeId/currentHouseId 空间指针
+    - 新增 progressMap 多维探索进度字典
+    - 初始 tensionLevel 改为 0（绝对安全开局）
+    - ChatMessage 快照新增 hp/inventory/currentNodeId/currentHouseId
+    
+    【模块三：两步走意图路由 + D20 结算管线】
+    - 新增 extractIntent() 意图抽取拦截器（idle/explore/combat/suicidal_idle/move）
+    - 重写 resolveD20() 纯 TS 状态机，覆盖全部 5 级紧张度 × 全意图的骰点区间
+    - Tension 0: 安全区休整回血 / move 强升 T1
+    - Tension 1: explore 按 1-3/4-16/17-20 分档，move 自动成功
+    - Tension 2&3: combat 按 1-4/5-16/17-20 分档，move 无伤脱战
+    - Tension 4: 死斗封锁，逃跑视为大失败
+    
+    【模块四：三大拦截器钩子】
+    - applyDeathHook: HP≤0 消耗复活币锁血 / lives=0 触发 Game Over
+    - applyMilestoneHook: 进度满 100% 时建筑变安全屋(T0) / 节点惊动 Boss(T4)
+    - FOV Hook: buildVisionContext() + getVisibleHouses() 局部视野注入
+    
+    【模块五：LLM 降级为纯图文渲染器】
+    - Prompt 重构：LLM 仅接收 narrativeInstruction 既定事实进行描写
+    - 移除 LLM 返回的 pacing_update/status_update，全部由前端预结算
+    - 输出格式精简为 text_sequence + image_prompt + scene_visuals_update
+    
+    【阶段零：初始化管线】
+    - 新增 generateWorldData() 生成 10 节点拓扑地图 JSON
+    - Chat.tsx 新增世界生成 effect，自动执行降生法则（首节点首建筑强制 safe）
+    - StatusSidebar 重构：HP 血条、复活币、当前位置、探索进度条
+    - DebugOverlay 增强：显示 HP/lives/位置/意图/narrativeInstruction
+
+ .gitignore                       |   1 +
+ src/components/DebugOverlay.tsx  |  46 ++-
+ src/components/StatusSidebar.tsx | 101 +++++-
+ src/contexts/GameContext.tsx     |  38 ++-
+ src/hooks/useChatLogic.ts        | 671 +++++++++++++++++++++++++++------------
+ src/pages/Chat.tsx               |  44 ++-
+ src/services/aiService.ts        | 116 +++++++
+ src/types/game.ts                | 102 +++++-
+ 8 files changed, 874 insertions(+), 245 deletions(-)
+
+commit e750de09ae35cdbcd037a0b60811d0c076b3a420
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 02:16:45 2026 +0800
+
+    更改 readme
+
+ README.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+commit 1ccebe37b2ae91774d715672219e045f5daec41d
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 01:42:35 2026 +0800
+
+    更改 readme
+
+ README.md | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+commit 59c8212f6dc649bdc40f73924c074a275e9f5ec8
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 01:41:51 2026 +0800
+
+    更改 readme
+
+ README.md | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+commit 99248a5a2a1502824f7142a95629566787d65c7e
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 01:39:45 2026 +0800
+
+    添加 readme
+
+ README.md | 69 +++++++++++++++++++++++++++++++++++++++++++++++++++------------
+ 1 file changed, 56 insertions(+), 13 deletions(-)
+
+commit af31254a35d383b04e7c8becc4fda792643e67e5
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 01:26:15 2026 +0800
+
+    删除无意义文件
+
+ public/a.txt | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+
+commit e8559e261cac49c286214b13da7dec5fd42cba35
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Tue Mar 10 01:10:23 2026 +0800
+
+    FEAT: 增加 BGM
+
+ public/a.txt                 |   0
+ public/levelBGM/Level0_1.mp3 | Bin 0 -> 6043188 bytes
+ public/levelBGM/Level0_2.mp3 | Bin 0 -> 8296018 bytes
+ public/levelBGM/Level1_1.mp3 | Bin 0 -> 5194315 bytes
+ public/levelBGM/Level1_2.mp3 | Bin 0 -> 5179679 bytes
+ public/levelBGM/Level1_3.mp3 | Bin 0 -> 5831608 bytes
+ public/levelBGM/Level1_4.mp3 | Bin 0 -> 4298204 bytes
+ public/levelBGM/Level2_1.mp3 | Bin 0 -> 2876124 bytes
+ public/levelBGM/Level2_2.mp3 | Bin 0 -> 4089793 bytes
+ public/levelBGM/Level3_1.mp3 | Bin 0 -> 11311732 bytes
+ public/levelBGM/Level3_2.mp3 | Bin 0 -> 3911669 bytes
+ public/levelBGM/Level4_1.mp3 | Bin 0 -> 5548584 bytes
+ public/levelBGM/Level4_2.mp3 | Bin 0 -> 5219540 bytes
+ src/components/ChatInput.tsx | 179 +++++++++++++++++++++++++++++++++++++------
+ src/contexts/GameContext.tsx |   3 +-
+ src/hooks/useBGM.ts          |  84 ++++++++++++++++++++
+ src/hooks/useChatLogic.ts    |  47 ++++++++----
+ src/pages/Chat.tsx           |  14 +++-
+ src/services/aiService.ts    |  30 ++++++--
+ src/types/game.ts            |   9 +++
+ 20 files changed, 317 insertions(+), 49 deletions(-)
+
+commit daaf47dd074ace0fa988890821dcef57aa9fbd67
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Mon Mar 9 22:23:35 2026 +0800
+
+    Fix 一轮对话的定义 bug
+
+ src/hooks/useChatLogic.ts | 46 ++++++++++++++++++++++++++++++++++------------
+ 1 file changed, 34 insertions(+), 12 deletions(-)
+
+commit 57551a204d17366f05934f452b730af7601557fb
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Mon Mar 9 21:21:26 2026 +0800
+
+    Fix 危机流转 bug
+
+ src/components/ChatMessageItem.tsx |  2 +-
+ src/hooks/useChatLogic.ts          | 66 +++++++++++++++++++++-----------------
+ 2 files changed, 37 insertions(+), 31 deletions(-)
+
+commit 129a66d1839dcdc01c5ec1328b2301744d81f3c9
+Author: Blind Holmes <hewenhan@gmail.com>
+Date:   Mon Mar 9 13:34:24 2026 +0800
+
+    Fix ws server error
+
+ server.ts                 | 10 ++++++++--
+ src/hooks/useChatLogic.ts |  9 +++++++++
+ 2 files changed, 17 insertions(+), 2 deletions(-)
+
+commit ab0106b8e82378ce38ae03ecd4610440746484a7
+Author: hewenhan <hewenhan@gmail.com>
+Date:   Mon Mar 9 11:17:51 2026 +0800
+
+    feat: Implement core game UI components
+    
+    Introduces essential UI elements for the AI RPG, including:
+    - ChatInput for user message submission with loading states.
+    - FleshingOutOverlay for indicating background processing.
+    - ProfileModal for initial player data entry.
+    - StatusSidebar for displaying game state information.
+    
+    These components establish the foundational user interface for interacting with the game and managing its state.
+
+ src/components/ChatInput.tsx          |  45 ++
+ src/components/FleshingOutOverlay.tsx |  24 +
+ src/components/ProfileModal.tsx       | 103 +++++
+ src/components/StatusSidebar.tsx      |  78 ++++
+ src/contexts/GameContext.tsx          |  10 +-
+ src/hooks/useChatLogic.ts             | 351 ++++++++++++++
+ src/pages/Chat.tsx                    | 842 +++++-----------------------------
+ src/pages/Home.tsx                    | 154 ++++++-
+ src/services/aiService.ts             | 157 +++++++
+ src/types/game.ts                     |  14 +-
+ 10 files changed, 1019 insertions(+), 759 deletions(-)
+
+commit 8e72f83a45e096bf3f7cb7340248821a198cbcf5
+Author: hewenhan <hewenhan@gmail.com>
+Date:   Mon Mar 9 07:23:14 2026 +0800
+
+    feat: Enhance character creation and UI elements
+    
+    Introduces a structured approach to character settings, moving from a simple string to a dedicated `CharacterProfile` interface. This allows for richer character details such as personality, background, and hobbies.
+    
+    Includes improvements to the `ChatMessageItem` component, adding an image fullscreen toggle and refactoring layout for better clarity.
+    
+    Also refactors `GameContext` to remove `currentSceneVisuals` and streamlines `state` management for improved data organization. The `ChatPage` now includes logic to automatically flesh out character details if they are incomplete upon loading.
+
+ src/components/ChatMessageItem.tsx | 171 ++++++++++++++++++---------
+ src/contexts/GameContext.tsx       |   4 +-
+ src/pages/Chat.tsx                 | 231 ++++++++++++++++++++++++++++++++-----
+ src/pages/Home.tsx                 |  80 +++++++++++--
+ src/types/game.ts                  |  14 ++-
+ 5 files changed, 401 insertions(+), 99 deletions(-)
+
+commit 5b1c6b7ba9ef8e1e6c7678156f5a47919994bc0d
+Author: hewenhan <hewenhan@gmail.com>
+Date:   Mon Mar 9 05:57:58 2026 +0800
+
+    feat: Initialize NexusTale AI RPG project
+    
+    Sets up the foundational structure and configuration for the NexusTale AI RPG. Includes initial README, environment configuration, dependency setup, and basic application routing.
+
+ .env.example                       |   12 +
+ .gitignore                         |    8 +
+ README.md                          |   19 +-
+ index.html                         |   13 +
+ metadata.json                      |    5 +
+ package-lock.json                  | 6518 ++++++++++++++++++++++++++++++++++++
+ package.json                       |   43 +
+ server.ts                          |  160 +
+ src/App.tsx                        |   28 +
+ src/components/ChatMessageItem.tsx |  112 +
+ src/components/DebugOverlay.tsx    |  107 +
+ src/contexts/AuthContext.tsx       |  148 +
+ src/contexts/GameContext.tsx       |  122 +
+ src/index.css                      |    1 +
+ src/lib/drive.ts                   |  107 +
+ src/lib/gemini.ts                  |   11 +
+ src/main.tsx                       |   10 +
+ src/pages/Chat.tsx                 |  782 +++++
+ src/pages/Home.tsx                 |  132 +
+ src/pages/Setup.tsx                |  258 ++
+ src/types/game.ts                  |  101 +
+ tsconfig.json                      |   26 +
+ vite.config.ts                     |   24 +
+ 23 files changed, 8742 insertions(+), 5 deletions(-)
+
+commit 1194c2273257847497b9a43bac679120d43b7199
+Author: hewenhan <hewenhan@gmail.com>
+Date:   Mon Mar 9 05:57:41 2026 +0800
+
+    Initial commit
+
+ README.md | 11 +++++++++++
+ 1 file changed, 11 insertions(+)

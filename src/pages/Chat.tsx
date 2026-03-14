@@ -723,7 +723,7 @@ export default function Chat() {
         {isGeneratingWorld && <FleshingOutOverlay ref={worldProgressRef} isWorld />}
       </AnimatePresence>
 
-      <DebugOverlay state={state} />
+      <DebugOverlay state={state} onUpdateState={updateState} />
 
       <DriveToast
         visible={driveError && !driveToastDismissed}

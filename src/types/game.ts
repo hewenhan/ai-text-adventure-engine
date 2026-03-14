@@ -67,6 +67,36 @@ export interface DebugState {
   lastImageError?: string;
 }
 
+/**
+ * Debug 面板的「下一回合覆写」指令
+ * 存储在 GameState 上，useChatLogic 在管线结束后一次性消费并清除
+ * 所有字段均为 optional —— 只有设置了的字段才会覆写管线结果
+ */
+export interface DebugOverrides {
+  /** 强制下一回合紧张度 */
+  tensionLevel?: 0 | 1 | 2 | 3 | 4;
+  /** 强制下一回合 HP */
+  hp?: number;
+  /** 强制下一回合命数 */
+  lives?: number;
+  /** 强制传送到指定 nodeId（清除 transitState） */
+  teleportNodeId?: string;
+  /** 强制传送到指定 houseId（需搭配 teleportNodeId） */
+  teleportHouseId?: string | null;
+  /** 强制覆写某个 progressKey 的值 */
+  progressOverride?: { key: string; value: number };
+  /** 强制派发任务 */
+  forceQuest?: { targetNodeId: string; targetHouseId: string; description: string };
+  /** 清除当前任务 */
+  clearQuest?: boolean;
+  /** 强制好感度 */
+  affection?: number;
+  /** 强制 D20 掷骰值 (1-20) */
+  forcedRoll?: number;
+  /** 强制 Game Over */
+  forceGameOver?: boolean;
+}
+
 export type Gender = 'Male' | 'Female' | 'Non-binary' | 'Other';
 export type Orientation = 'Heterosexual' | 'Homosexual' | 'Bisexual' | 'Pansexual' | 'Asexual' | 'Other';
 
@@ -158,6 +188,9 @@ export interface GameState {
 
   // 8. 好感度系统
   affection: number; // 0-100，初始值由 AI 根据世界观和性格生成
+
+  // 9. Debug 覆写（下一回合生效后自动清除）
+  debugOverrides?: DebugOverrides;
 }
 
 export interface ChatMessage {
@@ -292,5 +325,8 @@ export const INITIAL_STATE: GameState = {
   artStylePrompt: '',
 
   // Affection
-  affection: 50
+  affection: 50,
+
+  // Debug
+  debugOverrides: undefined
 };
