@@ -72,6 +72,7 @@ export function useChatLogic() {
     }
   }, [showNotification]);
 
+  const lockRef = useRef(false);
   const hasInitialized = useRef(false);
 
   useEffect(() => {
@@ -85,7 +86,8 @@ export function useChatLogic() {
     if (!state.playerProfile.name) return false;
     if (state.isGameOver) return false;
     if (!state.worldData || !state.currentNodeId) return false;
-    if (isProcessing) return false;
+    if (lockRef.current) return false;
+    lockRef.current = true;
 
     setIsProcessing(true);
 
@@ -266,7 +268,7 @@ export function useChatLogic() {
       });
 
       // ── Step 9: Display sequencing ──
-      runDisplaySequence({
+      await runDisplaySequence({
         messages,
         debugState: newDebugState,
         sceneVisuals: scene_visuals_update,
@@ -292,6 +294,8 @@ export function useChatLogic() {
         timestamp: Date.now()
       });
       setIsProcessing(false);
+    } finally {
+      lockRef.current = false;
     }
     return true;
   };
