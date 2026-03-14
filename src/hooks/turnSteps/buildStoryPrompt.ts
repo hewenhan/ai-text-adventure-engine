@@ -2,7 +2,7 @@
  * Module 5: 组装 LLM Story Renderer 的完整 prompt
  */
 
-import { findNode, findHouse, getVisibleHouses, getHpDescription } from '../../lib/pipeline';
+import { findNode, findHouse, getVisibleHouses, getHpDescription, applyProgressAndReveals } from '../../lib/pipeline';
 import { KEEP_RECENT_TURNS, type GameState } from '../../types/game';
 import type { PipelineResult } from '../../lib/pipeline';
 
@@ -26,9 +26,13 @@ function buildLocationContext(state: GameState, resolution: PipelineResult, visi
     return `【当前位置】：正在从【${fromNode?.name || resolution.newTransitState.fromNodeId}】赶往【${toNode?.name || resolution.newTransitState.toNodeId}】。(当前路程进度：${resolution.newTransitState.pathProgress}%)。${resolution.newTensionLevel >= 2 ? '请侧重描写沿途遭遇的危险和冲突。' : '请结合上下文世界观和角色性格或经历发表互动和思考，不要凭空制造危险。'}`;
   }
 
-  const updatedNode = findNode(state, resolution.newNodeId);
+  // 用 applyProgressAndReveals 模拟更新后的 worldData 以获取最新的 revealed 状态
+  const updatedWorldData = state.worldData
+    ? applyProgressAndReveals(state.worldData, resolution.newProgressMap, resolution.houseSafetyUpdate)
+    : null;
+  const updatedNode = updatedWorldData?.nodes.find(n => n.id === resolution.newNodeId);
   if (updatedNode) {
-    const visHouses = getVisibleHouses(updatedNode, resolution.newProgressMap, state.currentObjective);
+    const visHouses = getVisibleHouses(updatedNode);
     const hStr = visHouses.length > 0
       ? visHouses.map(h => `${h.name}(${h.type})`).join(', ')
       : '尚未发现可互动的建筑';

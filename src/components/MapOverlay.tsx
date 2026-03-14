@@ -170,9 +170,9 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
             {worldData.nodes.map(node => {
               const isCurrent = node.id === currentNodeId;
               const isObjectiveNode = state.currentObjective?.targetNodeId === node.id;
-              const nodeProgress = state.progressMap[`node_${node.id}`] || 0;
-              // Houses visible based on progress (every 30% reveals one) OR objective target
-              const visibleCount = Math.floor(nodeProgress / 30);
+              const nodeProgress = node.progress || 0;
+              // Houses visible based on persistent revealed flag
+              const visibleCount = node.houses.filter(h => h.revealed).length;
 
               return (
                 <div
@@ -240,9 +240,9 @@ export function MapOverlay({ state, onClose }: MapOverlayProps) {
                   <div className="flex flex-wrap gap-2">
                     {node.houses.map((house, idx) => {
                       const isObjectiveHouse = state.currentObjective?.targetHouseId === house.id;
-                      const isVisible = idx < visibleCount || (isCurrent && house.id === currentHouseId) || isObjectiveHouse;
+                      const isVisible = house.revealed || (isCurrent && house.id === currentHouseId) || isObjectiveHouse;
                       const isCurrentHouse = isCurrent && house.id === currentHouseId;
-                      const houseProgress = state.progressMap[`house_${house.id}`] || 0;
+                      const houseProgress = house.progress || 0;
 
                       if (!isVisible) {
                         return (

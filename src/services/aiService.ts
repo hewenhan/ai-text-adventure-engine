@@ -124,12 +124,10 @@ export async function generateTurn(fullPrompt: string): Promise<any> {
       // 4. 话题推进引擎 (Presence Penalty - 存在惩罚)：0.0 到 2.0
       // 设置为 0.3 可以轻微惩罚已经出现过的话题。
       // 作用：逼迫 AI 推进剧情，引导它发现新事物，而不是一直跟你扯皮“这里很危险”。
-      // presencePenalty: 0.3,
 
       // 5. 反复读机神器 (Frequency Penalty - 频率惩罚)：0.0 到 2.0
       // 极其关键！跑团游戏最怕 AI 词穷（比如动不动就“空气中弥漫着XX”）。
       // 设置为 0.4 会惩罚它用过的形容词，逼它换个说法，完美配合咱们之前的“防雷同”策略！
-      // frequencyPenalty: 0.4,
       safetySettings: [
         {
           category: HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -372,6 +370,15 @@ Return ONLY a JSON object with this EXACT structure (no markdown):
   }
 
   const normalizedWorld = normalizeConnections(parsed.worldData as WorldData);
+
+  // Ensure progress/revealed defaults for newly generated worldData
+  for (const node of normalizedWorld.nodes) {
+    node.progress = node.progress ?? 0;
+    for (const house of node.houses) {
+      house.progress = house.progress ?? 0;
+      house.revealed = house.revealed ?? false;
+    }
+  }
 
   return {
     worldData: normalizedWorld,

@@ -3,7 +3,8 @@ import { X, Heart, Shield, MapPin, Target } from 'lucide-react';
 import { GameState } from '../types/game';
 import { useAuth } from '../contexts/AuthContext';
 import { getImageUrlByName } from '../lib/drive';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import { extractProgressMap } from '../lib/pipeline';
 
 interface StatusSidebarProps {
   state: GameState;
@@ -15,6 +16,11 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
   const currentHouse = currentNode?.houses.find(h => h.id === state.currentHouseId);
   const { accessToken } = useAuth();
   const [portraitUrl, setPortraitUrl] = useState<string | null>(null);
+
+  const progressMap = useMemo(
+    () => state.worldData ? extractProgressMap(state.worldData) : {},
+    [state.worldData]
+  );
 
   useEffect(() => {
     if (!state.characterPortraitFileName || !accessToken) return;
@@ -164,11 +170,11 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
           </div>
 
           {/* Exploration Progress */}
-          {Object.keys(state.progressMap).length > 0 && (
+          {Object.keys(progressMap).length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">探索进度</h3>
               <div className="space-y-2">
-                {Object.entries(state.progressMap).map(([key, val]) => {
+                {Object.entries(progressMap).map(([key, val]) => {
                   // Resolve display name from key like "node_n3" or "house_h2_1"
                   let displayName = key;
                   if (state.worldData) {

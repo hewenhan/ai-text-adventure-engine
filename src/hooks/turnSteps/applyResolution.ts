@@ -4,6 +4,7 @@
 
 import type { GameState, DebugOverrides } from '../../types/game';
 import type { PipelineResult } from '../../lib/pipeline';
+import { applyProgressAndReveals } from '../../lib/pipeline';
 import type { DirectorResult } from './directorSystem';
 
 /**
@@ -66,23 +67,22 @@ export function applyNarrativeOverrides(
 
 /**
  * 将 resolution 结果写入 GameState（构建 updateState 回调所需的 partial）
+ * additionalRevealHouseIds: 本回合需要额外揭盲的建筑（如任务目标）
  */
-export function buildStateUpdate(resolution: PipelineResult): (prev: GameState) => Partial<GameState> {
+export function buildStateUpdate(
+  resolution: PipelineResult,
+  additionalRevealHouseIds?: string[],
+): (prev: GameState) => Partial<GameState> {
   return (prev: GameState) => {
-    let worldData = prev.worldData;
-    if (resolution.houseSafetyUpdate && worldData) {
-      worldData = {
-        ...worldData,
-        nodes: worldData.nodes.map(n => ({
-          ...n,
-          houses: n.houses.map(h =>
-            h.id === resolution.houseSafetyUpdate!.houseId
-              ? { ...h, safetyLevel: resolution.houseSafetyUpdate!.newSafetyLevel }
-              : h
-          )
-        }))
-      };
-    }
+    const worldData = prev.worldData
+      ? applyProgressAndReveals(
+          prev.worldData,
+          resolution.newProgressMap,
+          resolution.houseSafetyUpdate,
+          additionalRevealHouseIds,
+        )
+      : prev.worldData;
+
     return {
       hp: resolution.newHp,
       lives: resolution.newLives,
@@ -91,7 +91,6 @@ export function buildStateUpdate(resolution: PipelineResult): (prev: GameState) 
       currentNodeId: resolution.newNodeId,
       currentHouseId: resolution.newHouseId,
       transitState: resolution.newTransitState,
-      progressMap: resolution.newProgressMap,
       worldData,
       pacingState: {
         tensionLevel: resolution.newTensionLevel,

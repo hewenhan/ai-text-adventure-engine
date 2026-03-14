@@ -19,7 +19,7 @@ export function stepBehaviorOverride(ctx: PipelineContext): void {
   // 原因：该区域所有威胁已被探明，不再触发随机伏击
   if (tension === 1 && intent.intent === 'explore' && ctx.tier === 0) {
     const nodeKey = state.currentNodeId ? `node_${state.currentNodeId}` : '';
-    const nodeProgress = nodeKey ? (state.progressMap[nodeKey] || 0) : 0;
+    const nodeProgress = nodeKey ? (ctx.newProgressMap[nodeKey] || 0) : 0;
     const isOutdoors = !state.currentHouseId;
     if (nodeProgress >= 100 && isOutdoors) {
       ctx.tier = 1; // 大失败 → 普通

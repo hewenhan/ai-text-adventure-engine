@@ -8,6 +8,8 @@ export interface HouseData {
   name: string;
   type: HouseType;
   safetyLevel: SafetyLevel;
+  progress: number;   // 0-100 室内搜刮进度
+  revealed: boolean;  // 是否已揭盲（持久化，不重复通知）
 }
 
 export interface NodeData {
@@ -17,6 +19,7 @@ export interface NodeData {
   safetyLevel: SafetyLevel;
   connections: string[];
   houses: HouseData[];
+  progress: number;   // 0-100 区域探索进度
 }
 
 export interface WorldData {
@@ -167,10 +170,7 @@ export interface GameState {
   // 动态记忆黑名单：已经历过的遭遇主题，不再重复
   exhaustedThemes: string[];
 
-  // 4. Multi-dimensional exploration progress
-  progressMap: Record<string, number>; // e.g. {"node_n1": 100, "house_h2_1": 45}
-
-  // 5. Pacing state machine
+  // 4. Pacing state machine
   pacingState: {
     tensionLevel: 0 | 1 | 2 | 3 | 4;
     turnsInCurrentLevel: number;
@@ -308,9 +308,6 @@ export const INITIAL_STATE: GameState = {
   currentHouseId: null,
   transitState: null,
   exhaustedThemes: [],
-
-  // Progress
-  progressMap: {},
 
   // Pacing – start at tension 0 (absolute safety)
   pacingState: {

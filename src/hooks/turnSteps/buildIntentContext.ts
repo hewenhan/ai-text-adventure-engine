@@ -25,7 +25,7 @@ export function buildIntentContext(state: GameState): IntentContext {
   }).join(', ');
 
   // 组装已揭盲建筑信息
-  const visibleHousesList = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
+  const visibleHousesList = getVisibleHouses(currentNode);
   const visibleHousesInfo = visibleHousesList.length > 0
     ? visibleHousesList.map(h => `${h.id} (${h.name} - ${h.type})`).join(', ')
     : 'None';

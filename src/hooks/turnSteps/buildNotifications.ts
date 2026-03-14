@@ -1,8 +1,11 @@
 /**
  * 构建本回合待显示的通知列表（抵达/揭盲/发现建筑）
+ *
+ * 揭盲判定：比较 worldData 中 house.revealed（回合前快照）与
+ * applyProgressAndReveals 后的新 revealed 状态，差集即为新揭盲建筑。
  */
 
-import { getVisibleHouses } from '../../lib/pipeline';
+import { applyProgressAndReveals } from '../../lib/pipeline';
 import type { GameState } from '../../types/game';
 import type { PipelineResult } from '../../lib/pipeline';
 import type { GrandNotificationData } from '../../components/GrandNotification';
@@ -37,19 +40,32 @@ export function buildNotifications(
     });
   }
 
-  // 探索进度提升导致的建筑揭盲通知
-  const revealNode = state.worldData?.nodes.find(n => n.id === resolution.newNodeId);
-  if (revealNode && !resolution.newTransitState) {
-    const oldVisible = getVisibleHouses(revealNode, state.progressMap, state.currentObjective);
-    const newVisible = getVisibleHouses(revealNode, resolution.newProgressMap, state.currentObjective);
-    const oldIds = new Set(oldVisible.map(h => h.id));
-    const newlyRevealed = newVisible.filter(h => !oldIds.has(h.id));
-    for (const house of newlyRevealed) {
-      notifications.push({
-        type: 'discovery',
-        title: '发现新建筑！',
-        description: `在【${revealNode.name}】发现了【${house.name}】`,
-      });
+  // 探索进度 / 任务揭盲的建筑通知
+  // 用 applyProgressAndReveals 模拟新状态，与旧 worldData 比较 revealed 差集
+  if (state.worldData && !resolution.newTransitState) {
+    const questRevealIds = directorResult.newObjective
+      ? [directorResult.newObjective.targetHouseId]
+      : undefined;
+    const updatedWorldData = applyProgressAndReveals(
+      state.worldData,
+      resolution.newProgressMap,
+      resolution.houseSafetyUpdate,
+      questRevealIds,
+    );
+
+    const revealNode = updatedWorldData.nodes.find(n => n.id === resolution.newNodeId);
+    const oldNode = state.worldData.nodes.find(n => n.id === resolution.newNodeId);
+    if (revealNode && oldNode) {
+      const oldRevealedIds = new Set(oldNode.houses.filter(h => h.revealed).map(h => h.id));
+      for (const house of revealNode.houses) {
+        if (house.revealed && !oldRevealedIds.has(house.id)) {
+          notifications.push({
+            type: 'discovery',
+            title: '发现新建筑！',
+            description: `在【${revealNode.name}】发现了【${house.name}】`,
+          });
+        }
+      }
     }
   }
 

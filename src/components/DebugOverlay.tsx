@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { GameState, ENABLE_DEBUG_UI, DebugOverrides } from '../types/game';
+import { extractProgressMap } from '../lib/pipeline';
 
 // ─── 子组件：带标签的数字输入 ───
 const NumInput: React.FC<{
@@ -26,6 +27,12 @@ interface DebugOverlayProps {
 export const DebugOverlay: React.FC<DebugOverlayProps> = ({ state, onUpdateState }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [tab, setTab] = useState<'monitor' | 'override'>('monitor');
+
+  // 从 worldData 提取扁平进度表供 debug 面板使用
+  const progressMap = useMemo(
+    () => state.worldData ? extractProgressMap(state.worldData) : {},
+    [state.worldData]
+  );
 
   // ── override 表单暂存 ──
   const [ovTension, setOvTension] = useState<number | ''>('');
@@ -161,11 +168,11 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ state, onUpdateState
                 : <span className="text-gray-600">无</span>}
             </div>
 
-            {Object.keys(state.progressMap).length > 0 && (
+            {Object.keys(progressMap).length > 0 && (
               <div className="border-t border-gray-700 pt-2 mt-2">
                 <div className="text-gray-300 font-bold mb-1">PROGRESS MAP</div>
                 <div className="max-h-20 overflow-y-auto space-y-0.5">
-                  {Object.entries(state.progressMap).map(([k, v]) => (
+                  {Object.entries(progressMap).map(([k, v]) => (
                     <div key={k}>
                       <span className="text-cyan-400">{k}</span>: <span className={v >= 100 ? 'text-yellow-300 font-bold' : 'text-green-300'}>{v}%</span>
                     </div>
@@ -275,7 +282,7 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ state, onUpdateState
                   className="flex-1 bg-black/60 border border-green-700/50 rounded px-1 py-0.5 text-green-300 text-xs"
                 >
                   <option value="">--</option>
-                  {Object.keys(state.progressMap).map(k => <option key={k} value={k}>{k} ({state.progressMap[k]}%)</option>)}
+                  {Object.keys(progressMap).map(k => <option key={k} value={k}>{k} ({progressMap[k]}%)</option>)}
                   {nodes.map(n => <option key={`node_${n.id}`} value={`node_${n.id}`}>node_{n.id}</option>)}
                   {allHouses.map(h => <option key={`house_${h.id}`} value={`house_${h.id}`}>house_{h.id}</option>)}
                 </select>

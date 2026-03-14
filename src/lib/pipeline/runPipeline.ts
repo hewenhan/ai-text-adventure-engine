@@ -19,6 +19,7 @@
 
 import type { GameState, IntentResult } from '../../types/game';
 import type { PipelineContext, PipelineResult } from './types';
+import { extractProgressMap } from './helpers';
 
 import { stepProgressCalc } from './020_progressCalc';
 import { stepD20Roll } from './040_d20Roll';
@@ -42,7 +43,7 @@ function createContext(state: GameState, intent: IntentResult, d20Roll: number):
 
     // ① 进度
     activeProgressKey: '',
-    newProgressMap: { ...state.progressMap },
+    newProgressMap: state.worldData ? extractProgressMap(state.worldData) : {},
     newTransitState: state.transitState,
     progressJustHit100: false,
     progressCapped: false,

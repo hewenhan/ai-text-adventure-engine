@@ -37,7 +37,7 @@ function resolveMoveTarget(
 
   // 进入/切换建筑
   if (targetId && currentNode) {
-    const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
+    const visibleHouses = getVisibleHouses(currentNode);
     const targetHouse = visibleHouses.find(h => h.id === targetId);
     if (targetHouse) {
       if (state.currentHouseId && state.currentHouseId !== targetId) {
@@ -95,6 +95,8 @@ export function stepMoveResolve(ctx: PipelineContext): void {
     const inSafeNode = currentNode && currentNode.safetyLevel === 'safe';
     const isSafe = !!(inSafeHouse || inSafeNode);
 
+    const oldProgress = ctx.newProgressMap[ctx.activeProgressKey] || 0;
+
     if (isSafe) {
       // 安全区探索进度：普通+15, 大成功+40
       const progressGain = ctx.tier === 2 ? 40 : 15;
@@ -116,7 +118,6 @@ export function stepMoveResolve(ctx: PipelineContext): void {
     // T2+ 的 explore/combat 不增加进度
 
     // 检查进度是否刚跨过 100%
-    const oldProgress = state.progressMap[ctx.activeProgressKey] || 0;
     const newProgress = ctx.newProgressMap[ctx.activeProgressKey] || 0;
     if (newProgress >= 100 && oldProgress < 100) {
       ctx.progressJustHit100 = true;

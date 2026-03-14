@@ -15,15 +15,15 @@ export function ProgressTracker({ state }: ProgressTrackerProps) {
     progress = state.transitState.pathProgress;
     barColor = 'bg-amber-500';
     glowColor = 'shadow-amber-500/50';
-  } else if (state.currentHouseId) {
-    const key = `house_${state.currentHouseId}`;
-    progress = state.progressMap[key] || 0;
+  } else if (state.currentHouseId && state.worldData) {
+    const house = state.worldData.nodes.flatMap(n => n.houses).find(h => h.id === state.currentHouseId);
+    progress = house?.progress || 0;
     label = '室内搜刮';
     barColor = 'bg-cyan-400';
     glowColor = 'shadow-cyan-400/50';
-  } else if (state.currentNodeId) {
-    const key = `node_${state.currentNodeId}`;
-    progress = state.progressMap[key] || 0;
+  } else if (state.currentNodeId && state.worldData) {
+    const node = state.worldData.nodes.find(n => n.id === state.currentNodeId);
+    progress = node?.progress || 0;
     label = '区域探索';
     barColor = 'bg-emerald-400';
     glowColor = 'shadow-emerald-400/50';

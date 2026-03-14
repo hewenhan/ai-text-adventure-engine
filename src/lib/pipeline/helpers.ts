@@ -3,7 +3,7 @@
  * 空间查询、节点/建筑查找、可见性计算等
  */
 
-import type { GameState, NodeData, HouseData } from '../../types/game';
+import type { GameState, NodeData, HouseData, WorldData, SafetyLevel } from '../../types/game';
 
 /** 根据 nodeId 查找节点数据 */
 export function findNode(state: GameState, nodeId: string | null): NodeData | undefined {
@@ -19,19 +19,59 @@ export function findHouse(node: NodeData | undefined, houseId: string | null): H
 
 /**
  * 获取当前节点中已揭盲（可见）的建筑列表
- * 揭盲规则：每 30% 区域探索度解锁一个建筑，任务目标建筑特权直接可见
+ * 直接读取 house.revealed 持久标记
  */
-export function getVisibleHouses(
-  node: NodeData,
-  progressMap: Record<string, number>,
-  currentObjective?: GameState['currentObjective']
-): HouseData[] {
-  const nodeProgress = progressMap[`node_${node.id}`] || 0;
-  return node.houses.filter((h, index) => {
-    const isTargetObjective = currentObjective?.targetHouseId === h.id;
-    const isRevealedByProgress = nodeProgress >= (index + 1) * 30;
-    return isTargetObjective || isRevealedByProgress;
-  });
+export function getVisibleHouses(node: NodeData): HouseData[] {
+  return node.houses.filter(h => h.revealed);
+}
+
+/**
+ * 从 worldData 中提取扁平进度表，供管线内部使用
+ */
+export function extractProgressMap(worldData: WorldData): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const node of worldData.nodes) {
+    if (node.progress) map[`node_${node.id}`] = node.progress;
+    for (const house of node.houses) {
+      if (house.progress) map[`house_${house.id}`] = house.progress;
+    }
+  }
+  return map;
+}
+
+/**
+ * 将管线输出的扁平进度表 + 安全等级变更 回写到 worldData
+ * 同时根据进度阈值自动更新 house.revealed
+ */
+export function applyProgressAndReveals(
+  worldData: WorldData,
+  newProgressMap: Record<string, number>,
+  houseSafetyUpdate: { houseId: string; newSafetyLevel: SafetyLevel } | null,
+  additionalRevealHouseIds?: string[],
+): WorldData {
+  return {
+    ...worldData,
+    nodes: worldData.nodes.map(n => {
+      const nodeProgress = newProgressMap[`node_${n.id}`] ?? n.progress;
+      return {
+        ...n,
+        progress: nodeProgress,
+        houses: n.houses.map((h, index) => {
+          const houseProgress = newProgressMap[`house_${h.id}`] ?? h.progress;
+          const revealedByProgress = nodeProgress >= (index + 1) * 30;
+          const revealedByExtra = additionalRevealHouseIds?.includes(h.id);
+          return {
+            ...h,
+            progress: houseProgress,
+            revealed: h.revealed || revealedByProgress || !!revealedByExtra,
+            safetyLevel: houseSafetyUpdate?.houseId === h.id
+              ? houseSafetyUpdate.newSafetyLevel
+              : h.safetyLevel,
+          };
+        }),
+      };
+    }),
+  };
 }
 
 /** 构建当前视野描述文本（用于 AI prompt） */
@@ -39,7 +79,7 @@ export function buildVisionContext(state: GameState): string {
   const currentNode = findNode(state, state.currentNodeId);
   if (!currentNode) return '未知区域';
 
-  const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
+  const visibleHouses = getVisibleHouses(currentNode);
   const houseStr = visibleHouses.length > 0
     ? visibleHouses.map(h => `${h.name}(${h.type})`).join(', ')
     : '尚未发现可互动的建筑';

@@ -4,4 +4,4 @@
 
 export { runPipeline } from './runPipeline';
 export type { PipelineResult, PipelineContext } from './types';
-export { findNode, findHouse, getVisibleHouses, buildVisionContext, getHpDescription } from './helpers';
+export { findNode, findHouse, getVisibleHouses, buildVisionContext, getHpDescription, extractProgressMap, applyProgressAndReveals } from './helpers';

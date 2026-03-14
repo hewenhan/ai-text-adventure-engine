@@ -186,7 +186,11 @@ export function useChatLogic() {
       console.log("D20 Roll:", d20, "Resolution:", resolution);
 
       // ── Step 4: Write state ──
-      updateState(buildStateUpdate(resolution));
+      // 收集本回合需要额外揭盲的建筑 ID（任务目标）
+      const additionalRevealIds = directorResult.newObjective
+        ? [directorResult.newObjective.targetHouseId]
+        : undefined;
+      updateState(buildStateUpdate(resolution, additionalRevealIds));
 
       if (debugOv) {
         applyDebugDirectWrites(debugOv, updateState);
