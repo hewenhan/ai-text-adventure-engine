@@ -19,6 +19,7 @@ import { MapOverlay } from '../components/MapOverlay';
 import { FleshingOutOverlay } from '../components/FleshingOutOverlay';
 import { DriveToast } from '../components/DriveToast';
 import { FakeProgressBar, FakeProgressBarHandle } from '../components/FakeProgressBar';
+import { useRetryDialog } from '../components/RetryDialog';
 import { FloatingObjective } from '../components/FloatingObjective';
 import { uploadImageToDrive, getImageUrlByName } from '../lib/drive';
 import { initializeWorld, fetchCustomLoadingMessages, generateMapImage, generateCharacterPortrait } from '../services/aiService';
@@ -39,6 +40,9 @@ export default function Chat() {
   const [portraitUrl, setPortraitUrl] = useState<string | null>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   
+  // Retry dialog for failed AI requests
+  const { retryDialog, showRetry } = useRetryDialog();
+
   // Affection change animation
   const [affectionDelta, setAffectionDelta] = useState<number | null>(null);
   const [affectionAnimKey, setAffectionAnimKey] = useState(0);
@@ -124,6 +128,42 @@ export default function Chat() {
     }
   }, [state.playerProfile.name]);
 
+  // Helper: generate map with retry
+  const doGenerateMap = useCallback(async (worldData: NonNullable<typeof state.worldData>, worldview: string, artStyle: string) => {
+    const attempt = async () => {
+      const base64 = await generateMapImage(worldData, worldview, artStyle);
+      if (base64 && isAuthenticated && accessToken) {
+        const fileName = `ai_rpg_map_${Date.now()}.png`;
+        await uploadImageToDrive(accessToken, base64, fileName);
+        updateState({ mapImageFileName: fileName });
+      }
+    };
+    try {
+      await attempt();
+    } catch (e) {
+      console.error('Map image generation failed', e);
+      await showRetry('地图生成失败', '生成世界地图时出错，是否重试？', attempt);
+    }
+  }, [isAuthenticated, accessToken, updateState, showRetry]);
+
+  // Helper: generate portrait with retry
+  const doGeneratePortrait = useCallback(async (appearancePrompt: string, worldview: string, artStyle: string) => {
+    const attempt = async () => {
+      const base64 = await generateCharacterPortrait(appearancePrompt, worldview, artStyle);
+      if (base64 && accessToken) {
+        const fileName = `ai_rpg_portrait_${Date.now()}.png`;
+        await uploadImageToDrive(accessToken, base64, fileName);
+        updateState({ characterPortraitFileName: fileName });
+      }
+    };
+    try {
+      await attempt();
+    } catch (e) {
+      console.error('Portrait generation failed', e);
+      await showRetry('头像生成失败', '生成角色头像时出错，是否重试？', attempt);
+    }
+  }, [accessToken, updateState, showRetry]);
+
   // Unified World Initialization: world topology + both character profiles in one request
   const [isGeneratingWorld, setIsGeneratingWorld] = useState(false);
   useEffect(() => {
@@ -131,7 +171,7 @@ export default function Chat() {
       setIsGeneratingWorld(true);
       setIsFleshingOutCharacter(true);
       (async () => {
-        try {
+        const attemptInit = async () => {
           const result = await initializeWorld(
             state.worldview,
             state.playerProfile,
@@ -160,40 +200,31 @@ export default function Chat() {
               : {})
           });
 
-          // Generate map image in background (non-blocking)
-          generateMapImage(result.worldData, state.worldview, finalArtStyle).then(async base64 => {
-            if (base64 && isAuthenticated && accessToken) {
-              try {
-                const fileName = `ai_rpg_map_${Date.now()}.png`;
-                await uploadImageToDrive(accessToken, base64, fileName);
-                updateState({ mapImageFileName: fileName });
-              } catch (e) {
-                console.error("Map image upload to Drive failed, discarding base64 to avoid bloating save", e);
-                // 不写入 base64，下次打开地图时可重新生成
-              }
-            }
-          }).catch(e => console.error("Map image generation failed", e));
+          // Generate map image in background (non-blocking, with retry)
+          doGenerateMap(result.worldData, state.worldview, finalArtStyle);
 
-          // Generate companion portrait in background (non-blocking)
+          // Generate companion portrait in background (non-blocking, with retry)
           if (result.companionProfile.appearancePrompt && isAuthenticated && accessToken) {
-            generateCharacterPortrait(result.companionProfile.appearancePrompt, state.worldview, finalArtStyle).then(async base64 => {
-              if (base64 && accessToken) {
-                try {
-                  const fileName = `ai_rpg_portrait_${Date.now()}.png`;
-                  await uploadImageToDrive(accessToken, base64, fileName);
-                  updateState({ characterPortraitFileName: fileName });
-                } catch (e) {
-                  console.error("Portrait upload to Drive failed", e);
-                }
-              }
-            }).catch(e => console.error("Portrait generation failed", e));
+            doGeneratePortrait(result.companionProfile.appearancePrompt, state.worldview, finalArtStyle);
           }
+        };
+
+        try {
+          await attemptInit();
         } catch (error) {
-          console.error("Failed to initialize world", error);
-          updateState({
-            companionProfile: { ...state.companionProfile, isFleshedOut: true },
-            playerProfile: { ...state.playerProfile, isFleshedOut: true },
-          });
+          console.error('Failed to initialize world', error);
+          // Show retry dialog; if user cancels, fall back to unblocking UI
+          const retried = await showRetry(
+            '世界初始化失败',
+            '生成世界观和角色信息时出错，是否重试？',
+            attemptInit,
+          );
+          if (!retried) {
+            updateState({
+              companionProfile: { ...state.companionProfile, isFleshedOut: true },
+              playerProfile: { ...state.playerProfile, isFleshedOut: true },
+            });
+          }
         } finally {
           worldProgressRef.current?.finish();
           characterProgressRef.current?.finish();
@@ -212,11 +243,15 @@ export default function Chat() {
                               (state.loadingMessages.length > 0 && DEFAULT_LOADING_MESSAGES.includes(state.loadingMessages[0]));
       
       if (state.worldview && isUsingDefaults && !isProcessing) {
-        try {
+        const attempt = async () => {
           const messages = await fetchCustomLoadingMessages(state.worldview, state.language);
           updateState({ loadingMessages: messages });
+        };
+        try {
+          await attempt();
         } catch (error) {
-          console.error("Failed to fetch background loading messages", error);
+          console.error('Failed to fetch background loading messages', error);
+          await showRetry('加载提示生成失败', '生成世界观加载提示时出错，是否重试？', attempt);
         }
       }
     };
@@ -726,6 +761,8 @@ export default function Chat() {
         onDismiss={() => setDriveToastDismissed(true)}
         onReconnect={handleReconnectDrive}
       />
+
+      {retryDialog}
     </div>
   );
 }
