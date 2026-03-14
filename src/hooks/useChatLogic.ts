@@ -4,10 +4,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import { generateSummary, generateTurn, generateImage, extractIntent, resolveObjectivePathfinding, IMAGE_PROHIBITED_SENTINEL } from '../services/aiService';
 import { uploadImageToDrive } from '../lib/drive';
-import { D20Resolver } from '../lib/D20Resolver';
+import { runPipeline, findNode, findHouse, getVisibleHouses, buildVisionContext, getHpDescription } from '../lib/pipeline';
 import { useGrandNotification, type GrandNotificationData } from '../components/GrandNotification';
 import {
-  SUMMARY_THRESHOLD, KEEP_RECENT_TURNS, BGM_LIST,
+  SUMMARY_THRESHOLD, KEEP_RECENT_TURNS,
   type GameState, type IntentResult, type NodeData, type HouseData
 } from '../types/game';
 
@@ -25,60 +25,7 @@ const getStartIndexForRecentTurns = (messages: { role: string }[], turns: number
   return 0;
 };
 
-// ─── Spatial Helpers ───────────────────────────────────────────
-
-function findNode(state: GameState, nodeId: string | null): NodeData | undefined {
-  if (!nodeId || !state.worldData) return undefined;
-  return state.worldData.nodes.find(n => n.id === nodeId);
-}
-
-function findHouse(node: NodeData | undefined, houseId: string | null): HouseData | undefined {
-  if (!node || !houseId) return undefined;
-  return node.houses.find(h => h.id === houseId);
-}
-
-function getVisibleHouses(node: NodeData, progressMap: Record<string, number>, currentObjective?: GameState['currentObjective']): HouseData[] {
-  const nodeProgress = progressMap[`node_${node.id}`] || 0;
-  return node.houses.filter((h, index) => {
-    // 特权：如果是当前主线目标建筑，无视进度，直接揭盲可见
-    const isTargetObjective = currentObjective?.targetHouseId === h.id;
-    // 常规：依靠探索进度逐步揭盲
-    const isRevealedByProgress = nodeProgress >= (index + 1) * 30;
-    return isTargetObjective || isRevealedByProgress;
-  });
-}
-
-function buildVisionContext(state: GameState): string {
-  const currentNode = findNode(state, state.currentNodeId);
-  if (!currentNode) return '未知区域';
-  
-  const visibleHouses = getVisibleHouses(currentNode, state.progressMap, state.currentObjective);
-  const houseStr = visibleHouses.length > 0
-    ? visibleHouses.map(h => `${h.name}(${h.type})`).join(', ')
-    : '尚未发现可互动的建筑';
-
-  const currentHouse = findHouse(currentNode, state.currentHouseId);
-  const locationStr = currentHouse
-    ? `当前位于: ${currentNode.name} → ${currentHouse.name}`
-    : `当前位于: ${currentNode.name}(野外街区)`;
-
-  return `${locationStr}. 已揭盲可互动的微观建筑: ${houseStr}`;
-}
-
-function getHpDescription(hp: number, language: 'zh' | 'en'): string {
-  if (language === 'zh') {
-    if (hp >= 80) return '健康无伤';
-    if (hp >= 50) return '轻微擦伤';
-    if (hp >= 30) return '受伤流血';
-    return '重伤咳血，濒临倒下';
-  }
-  if (hp >= 80) return 'Healthy, no injuries';
-  if (hp >= 50) return 'Minor scratches';
-  if (hp >= 30) return 'Wounded, bleeding';
-  return 'Critically wounded, on the verge of collapse';
-}
-
-// ─── D20 State Machine (moved to src/lib/D20Resolver.ts) ─────
+// ─── Spatial helpers & D20 pipeline → src/lib/pipeline/ ──────
 
 // ─── Main Hook ────────────────────────────────────────────────
 
@@ -291,9 +238,7 @@ export function useChatLogic() {
         }
       }
 
-      if (intent.intent === 'explore' && state.pacingState.tensionLevel === 0) {
-        state.pacingState.tensionLevel = 1; // Force escalate to Tension 1 if trying to explore in safe zone  
-      }
+      // ── 探索时 T0→T1 升压已在 pipeline step05 处理 ──
 
       // ── Step 1.8: 赶路中掉头处理（由意图 AI 判定 direction） ──
       let resolveState = state;
@@ -309,9 +254,9 @@ export function useChatLogic() {
         console.log('Transit RETREAT: reversed', state.transitState, '->', reversed);
       }
 
-      // ── Step 2: D20 State Machine Resolution ──
+      // ── Step 2: Pipeline State Machine Resolution ──
       const d20 = Math.floor(Math.random() * 20) + 1;
-      const resolution = D20Resolver.resolve(resolveState, intent, d20);
+      const resolution = runPipeline(resolveState, intent, d20);
 
       // 如果导演系统有叙事覆盖，替换 resolution 的 narrativeInstruction
       if (directorNarrativeOverride) {
@@ -335,8 +280,7 @@ export function useChatLogic() {
       console.log("D20 Roll:", d20, "Resolution:", resolution);
 
       // ── Apply state changes from resolution ──
-      const prevTension = state.pacingState.tensionLevel;
-      const tensionChanged = resolution.newTensionLevel !== prevTension;
+      const tensionChanged = resolution.tensionChanged;
 
       updateState(prev => {
         let worldData = prev.worldData;
@@ -637,25 +581,8 @@ OUTPUT FORMAT (JSON ONLY):
         lastImageError: undefined as string | undefined
       };
 
-      // ── BGM selection ── 
-      let selectedBgmKey: string | undefined;
-      if (tensionChanged) {
-        const bgmCandidates = BGM_LIST[resolution.newTensionLevel as keyof typeof BGM_LIST] || [];
-        selectedBgmKey = bgmCandidates.length > 0
-          ? bgmCandidates[Math.floor(Math.random() * bgmCandidates.length)]
-          : undefined;
-      } else {
-        for (let i = state.history.length - 1; i >= 0; i--) {
-          if (state.history[i].bgmKey) { selectedBgmKey = state.history[i].bgmKey; break; }
-        }
-      }
-      // Fallback: if still no BGM (e.g. first turn, empty history), pick one for current tension
-      if (!selectedBgmKey) {
-        const bgmFallback = BGM_LIST[resolution.newTensionLevel as keyof typeof BGM_LIST] || [];
-        selectedBgmKey = bgmFallback.length > 0
-          ? bgmFallback[Math.floor(Math.random() * bgmFallback.length)]
-          : undefined;
-      }
+      // ── BGM selection（已由 pipeline step10 计算） ── 
+      const selectedBgmKey = resolution.selectedBgmKey;
 
       // ── Image generation ──
       let imagePromise: Promise<string | undefined> = Promise.resolve(undefined);
