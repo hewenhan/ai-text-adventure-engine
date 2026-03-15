@@ -74,6 +74,38 @@ export default function Chat() {
 
   const { isProcessing, handleTurn, flushPendingNotifications } = useChatLogic();
 
+  // ── Deferred display snapshot ──
+  // Progress bar & objective only update after the last typewriter message completes
+  const latestDeferredRef = useRef({
+    currentNodeId: state.currentNodeId,
+    currentHouseId: state.currentHouseId,
+    transitState: state.transitState,
+    currentObjective: state.currentObjective,
+  });
+  useEffect(() => {
+    latestDeferredRef.current = {
+      currentNodeId: state.currentNodeId,
+      currentHouseId: state.currentHouseId,
+      transitState: state.transitState,
+      currentObjective: state.currentObjective,
+    };
+  }, [state.currentNodeId, state.currentHouseId, state.transitState, state.currentObjective]);
+
+  const [displaySnapshot, setDisplaySnapshot] = useState(latestDeferredRef.current);
+
+  // When not processing, keep display in sync immediately
+  useEffect(() => {
+    if (!isProcessing) {
+      setDisplaySnapshot(latestDeferredRef.current);
+    }
+  }, [isProcessing, state.currentNodeId, state.currentHouseId, state.transitState, state.currentObjective]);
+
+  // Wrapped flush: sync deferred display after last typewriter completes
+  const wrappedFlushNotifications = useCallback(() => {
+    flushPendingNotifications();
+    setDisplaySnapshot({ ...latestDeferredRef.current });
+  }, [flushPendingNotifications]);
+
   // BGM: find the latest bgmKey from chat history
   const currentBgmKey = useMemo(() => {
     for (let i = state.history.length - 1; i >= 0; i--) {
@@ -617,8 +649,8 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* Progress Tracker */}
-      <ProgressTracker state={state} />
+      {/* Progress Tracker (uses deferred snapshot so updates appear after AI finishes) */}
+      <ProgressTracker state={{...state, ...displaySnapshot}} />
 
       {/* Chat Area */}
       <div ref={chatAreaRef} className="flex-1 p-2 sm:p-4 space-y-2 sm:space-y-6 h-full overflow-hidden relative">
@@ -650,8 +682,8 @@ export default function Chat() {
           )}
         </AnimatePresence>
         <AnimatePresence>
-          {state.currentObjective && (
-            <FloatingObjective description={state.currentObjective.description} constraintsRef={chatAreaRef} />
+          {displaySnapshot.currentObjective && (
+            <FloatingObjective description={displaySnapshot.currentObjective.description} constraintsRef={chatAreaRef} />
           )}
         </AnimatePresence>
         <Virtuoso
@@ -659,7 +691,7 @@ export default function Chat() {
           data={state.history}
           initialTopMostItemIndex={state.history.length - 1}
           followOutput="smooth"
-          context={{ onDelete: handleDeleteMessage, imageUrls, characterName, playerName: state.playerProfile.name || '你', onImageLoaded: handleImageLoaded, portraitUrl, totalMessages: state.history.length, textSpeed, flushPendingNotifications, animatedIds: animatedIdsRef.current }}
+          context={{ onDelete: handleDeleteMessage, imageUrls, characterName, playerName: state.playerProfile.name || '你', onImageLoaded: handleImageLoaded, portraitUrl, totalMessages: state.history.length, textSpeed, flushPendingNotifications: wrappedFlushNotifications, animatedIds: animatedIdsRef.current }}
           itemContent={(index, msg, context) => {
             const isLast = index === context.totalMessages - 1;
             const isLastModel = msg.role === 'model' && isLast;
@@ -689,8 +721,8 @@ export default function Chat() {
           components={{
             Footer: () => (
               isProcessing ? (
-                <div className="flex w-full mx-auto pb-6 px-4 gap-3 justify-start">
-                  <div className="w-20 h-20 rounded-xl bg-zinc-800 shrink-0 overflow-hidden border border-zinc-700 flex items-center justify-center mt-5">
+                <div className="flex w-full mx-auto pb-6 px-2 sm:px-4 gap-2 sm:gap-3 justify-start">
+                  <div className="w-10 h-10 sm:w-20 sm:h-20 rounded-xl bg-zinc-800 shrink-0 overflow-hidden border border-zinc-700 flex items-center justify-center mt-1 sm:mt-5">
                     {portraitUrl ? (
                       <img src={portraitUrl} alt={characterName} className="w-full h-full object-cover" />
                     ) : (
@@ -699,7 +731,7 @@ export default function Chat() {
                   </div>
                   
                   <div className="flex flex-col max-w-[75%] items-start">
-                    <div className="text-xs text-zinc-500 mb-1 px-1">
+                    <div className="text-xs text-zinc-500 mb-0.5 sm:mb-1 px-1">
                       {characterName}
                     </div>
                     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl rounded-tl-sm p-4 flex items-center gap-3 w-fit shadow-sm">
