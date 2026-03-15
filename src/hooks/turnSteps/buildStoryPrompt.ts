@@ -3,7 +3,7 @@
  */
 
 import { findNode, findHouse, getVisibleHouses, getHpDescription, applyProgressAndReveals } from '../../lib/pipeline';
-import { KEEP_RECENT_TURNS, type GameState } from '../../types/game';
+import { KEEP_RECENT_TURNS, INVENTORY_CAPACITY, type GameState } from '../../types/game';
 import type { PipelineResult } from '../../lib/pipeline';
 
 // Helper to find the index of the Nth-to-last user message
@@ -102,6 +102,39 @@ function buildCharacterRoleString(state: GameState): string {
   ].join('\n');
 }
 
+// ── 背包与任务链上下文 ──
+function buildInventoryAndQuestContext(state: GameState): string {
+  const parts: string[] = [];
+
+  // Inventory summary
+  if (state.inventory.length > 0) {
+    const items = state.inventory.map(i => {
+      let label = `${i.icon} ${i.name}(${i.type}`;
+      if (i.buff) label += `, buff:${i.buff}%`;
+      label += ')';
+      return label;
+    }).join(', ');
+    parts.push(`背包(${state.inventory.length}/${INVENTORY_CAPACITY}): ${items}`);
+  } else {
+    parts.push(`背包: 空(${INVENTORY_CAPACITY}格)`);
+  }
+
+  // Quest chain status
+  if (state.questChain && state.questChain.length > 0) {
+    const currentStage = state.questChain[state.currentQuestStageIndex];
+    const totalStages = state.questChain.length;
+    const completedCount = state.questChain.filter(s => s.completed).length;
+    parts.push(`任务链进度: ${completedCount}/${totalStages}环`);
+    if (currentStage && !currentStage.completed) {
+      parts.push(`当前任务: ${currentStage.description}`);
+      const neededItems = currentStage.requiredItems.map(ri => ri.name).join(', ');
+      if (neededItems) parts.push(`所需道具: ${neededItems}`);
+    }
+  }
+
+  return parts.join('\n- ');
+}
+
 // ── 主函数 ──
 
 export interface StoryPromptInput {
@@ -110,15 +143,20 @@ export interface StoryPromptInput {
   currentSummary: string;
   userInput: string;
   visionContext: string;
+  /** 搜刮结果叙事指令（命中/未命中均有文案），由调用方预生成 */
+  itemDropInstruction?: string | null;
+  /** 是否期望 AI 在 get_item 字段返回道具信息 */
+  expectGetItem?: boolean;
 }
 
 export function buildStoryPrompt(input: StoryPromptInput): string {
-  const { state, resolution, currentSummary, userInput, visionContext } = input;
+  const { state, resolution, currentSummary, userInput, visionContext, itemDropInstruction, expectGetItem } = input;
 
   const locationContext = buildLocationContext(state, resolution, visionContext);
   const progressLabel = buildProgressLabel(resolution);
   const themeInstruction = buildThemeInstruction(state, resolution);
   const characterRoleString = buildCharacterRoleString(state);
+  const inventoryAndQuestContext = buildInventoryAndQuestContext(state);
 
   const lastVisuals = [...state.history].reverse().find(m => m.currentSceneVisuals)?.currentSceneVisuals || 'None yet';
 
@@ -152,6 +190,7 @@ ${characterRoleString}
 - ${progressLabel}（【揭盲锁】：未满100%绝不可描写彻底探索完毕！）
 - 紧张等级: ${resolution.newTensionLevel}（0=和平, 1=探索, 2=冲突, 3=危机, 4=死斗）
 - 好感度: ${state.affection}/100
+- ${inventoryAndQuestContext}
 
 上一场景视觉: "${lastVisuals}"
 
@@ -199,6 +238,7 @@ CORE RULES (泛用型高阶扮演引擎):
 
 本次检定的既定事实 (Required Outcome) - 极其重要：
 ${resolution.narrativeInstruction}${themeInstruction}（不要和已有聊天记录出现同质化危机）
+${itemDropInstruction || ''}
 
 ⚠️ 【系统最高覆盖指令 (System Override)】：
 无论上述既定事实如何要求，**如果当前玩家的 User Action 是极度简短、敷衍的词语（如"嗯"、"哦"、"不知道"、"走"），你必须无视既定事实中关于"聊背景/聊设定"的软性要求，强制执行 CORE RULES 第4条和第5条！用主观偏见、吐槽或掩饰性动作来回应冷场！**
@@ -212,7 +252,8 @@ OUTPUT FORMAT (JSON ONLY):
   "scene_visuals_update": "仅在进入新地点时提供，否则省略",
   "hp_description": "根据当前HP(${resolution.newHp}/100)用一句简短的话描述角色当前的身体健康状况（如：'精神饱满，毫发无伤'、'左臂渗血，脸色苍白'等）",
   "encounter_tag": "用2-4个字概括当前生成的遭遇主题(如：失控卡车、暴雨泥石流、流浪恶犬)。仅在旅途/危机场景中提供，安全区可省略",
-  "affection_change": "number（根据玩家本回合行为对好感度的影响值。正数=好感上升（最多+10），负数=好感下降（最多-30）。判断依据：玩家行为是否符合角色喜好/特长则+, 是否触犯角色厌恶属性则-。无明显影响时填0。）"
+  "affection_change": "number（根据玩家本回合行为对好感度的影响值。正数=好感上升（最多+10），负数=好感下降（最多-30）。判断依据：玩家行为是否符合角色喜好/特长则+, 是否触犯角色厌恶属性则-。无明显影响时填0。）",
+  "get_item": ${expectGetItem ? '{"name": "道具名称", "description": "关于道具的简短说明"}' : 'null（本回合无道具掉落）'}
 }
 
 不需要返回任何状态数值 update（全部数据状态已在系统后台静默变更完毕）。`;

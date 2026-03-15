@@ -69,13 +69,90 @@ export function normalizeConnections(worldData: WorldData): WorldData {
   };
 }
 
+// --- Inventory & Item Types ---
+export type ItemType = 'quest' | 'escape' | 'weapon' | 'armor';
+export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  type: ItemType;
+  description: string;
+  rarity: Rarity;
+  icon: string;
+  quantity: number;
+  buff: number | null; // weapon/armor only: 20-80%
+}
+
+/** 稀有度颜色映射 */
+export const RARITY_COLORS: Record<Rarity, string> = {
+  common: '#9ca3af',    // 灰
+  uncommon: '#22c55e',  // 绿
+  rare: '#3b82f6',      // 蓝
+  epic: '#a855f7',      // 紫
+  legendary: '#f97316', // 橙
+};
+
+/** 背包容量上限 */
+export const INVENTORY_CAPACITY = 10;
+
+/** 退敌道具稀有度概率表: common 50%, uncommon 30%, rare 15%, epic 4%, legendary 1% */
+export function rollEscapeRarity(): Rarity {
+  const r = Math.random();
+  if (r < 0.01) return 'legendary';
+  if (r < 0.05) return 'epic';
+  if (r < 0.20) return 'rare';
+  if (r < 0.50) return 'uncommon';
+  return 'common';
+}
+
+/** 退敌道具图标池（按稀有度） */
+export const ESCAPE_ICON_POOL: Record<Rarity, string[]> = {
+  common:    ['💨', '🪢', '💚'],
+  uncommon:  ['✨', '😢', '🎯'],
+  rare:      ['🧪', '🛡️', '🔮'],
+  epic:      ['📜', '⚡', '🔥'],
+  legendary: ['🌟', '💎', '☄️'],
+};
+
+export function pickEscapeIcon(rarity: Rarity): string {
+  const pool = ESCAPE_ICON_POOL[rarity];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// --- Quest Chain Types ---
+export interface QuestStage {
+  stageIndex: number;
+  targetNodeId: string;
+  targetHouseId: string; // '' means node-level (outdoors)
+  targetLocationName: string;
+  description: string;
+  requiredItems: { name: string; id: string }[];
+  completed: boolean;
+  arrivedAtTarget: boolean;
+}
+
+// --- Equipment Presets ---
+/**
+ * 装备 buff 分布表（每稀有度 5 件）
+ * 可在此处统一调整数值
+ */
+export const EQUIPMENT_BUFF_TABLE: Record<Rarity, number[]> = {
+  common:    [20, 22, 24, 26, 28],
+  uncommon:  [32, 34, 36, 38, 40],
+  rare:      [44, 48, 52, 56, 60],
+  epic:      [62, 66, 70, 74, 78],
+  legendary: [72, 74, 76, 78, 80],
+};
+
 // --- Intent Types ---
-export type IntentType = 'idle' | 'explore' | 'combat' | 'suicidal_idle' | 'move' | 'seek_quest';
+export type IntentType = 'idle' | 'explore' | 'combat' | 'suicidal_idle' | 'move' | 'seek_quest' | 'use_item';
 
 export interface IntentResult {
   intent: IntentType;
   targetId: string | null;
   direction?: 'forward' | 'back';
+  itemName?: string; // use_item 意图时，玩家试图使用的道具名
 }
 
 // --- Debug & Profile ---
@@ -110,7 +187,7 @@ export interface DebugOverrides {
   /** 强制覆写某个 progressKey 的值 */
   progressOverride?: { key: string; value: number };
   /** 强制派发任务 */
-  forceQuest?: { targetNodeId: string; targetHouseId: string; description: string };
+  forceQuest?: { targetNodeId: string; targetHouseId: string; targetLocationName: string; description: string };
   /** 清除当前任务 */
   clearQuest?: boolean;
   /** 强制好感度 */
@@ -169,7 +246,7 @@ export interface GameState {
   hpDescription: string;  // AI-generated health status text
   lives: number;          // Revival tokens, 0 = permanent death
   isGameOver: boolean;
-  inventory: string[];    // Explicit backpack
+  inventory: InventoryItem[];    // 背包（上限 INVENTORY_CAPACITY 格）
   status: Record<string, any>; // Soft statuses only (e.g. wet, bleeding)
 
   // 3. Global map & spatial pointers
@@ -201,8 +278,16 @@ export interface GameState {
   currentObjective: {
     targetNodeId: string;
     targetHouseId: string;
+    targetLocationName: string;
     description: string;
   } | null;
+
+  // 6.5 任务链系统
+  questChain: QuestStage[] | null;
+  currentQuestStageIndex: number;
+
+  // 6.6 装备预设池（世界观生成时创建，获取后从池中移除）
+  equipmentPresets: InventoryItem[];
 
   // 7. 世界观画风提词（用于统一所有生图风格）
   artStylePrompt: string;
@@ -216,7 +301,7 @@ export interface GameState {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'model';
+  role: 'user' | 'model' | 'narrator';
   text: string;
   imageFileName?: string;
   timestamp: number;
@@ -227,7 +312,7 @@ export interface ChatMessage {
   };
   hp?: number;
   hpDescription?: string;
-  inventory?: string[];
+  inventory?: InventoryItem[];
   status?: Record<string, any>;
   currentSceneVisuals?: string;
   currentNodeId?: string;
@@ -338,6 +423,13 @@ export const INITIAL_STATE: GameState = {
 
   // Objective
   currentObjective: null,
+
+  // Quest chain
+  questChain: null,
+  currentQuestStageIndex: 0,
+
+  // Equipment presets
+  equipmentPresets: [],
 
   // Art style
   artStylePrompt: '',

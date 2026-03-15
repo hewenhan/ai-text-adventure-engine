@@ -77,9 +77,14 @@ function createContext(state: GameState, intent: IntentResult, d20Roll: number):
     bossSpawn: null,
     bossDefeatedKey: null,
     inBossZone: false,
+    guaranteedDrop: null,
 
     // ⑧ HP
     newHp: state.hp,
+    armorReduction: 0,
+
+    // ⑧½ 退敌道具
+    escapeItemUsed: null,
 
     // ⑨ 死亡
     newLives: state.lives,
@@ -87,10 +92,11 @@ function createContext(state: GameState, intent: IntentResult, d20Roll: number):
 
 
     // ⑩ BGM/叙事
-    newInventory: [...state.inventory],
+    newInventory: state.inventory.map(item => ({ ...item })),
     isSuccess: false,
     narrativeInstruction: '',
     selectedBgmKey: undefined,
+    weaponBuff: 0,
 
     // 调试
     debugFormula: '',
@@ -118,6 +124,7 @@ function extractResult(ctx: PipelineContext): PipelineResult {
     bossSpawn: ctx.bossSpawn,
     bossDefeatedKey: ctx.bossDefeatedKey,
     inBossZone: ctx.inBossZone,
+    guaranteedDrop: ctx.guaranteedDrop,
     affectionTriggered: ctx.affectionTriggered,
     formulaBreakdown: ctx.formulaBreakdown,
     tensionChanged: ctx.tensionChanged,

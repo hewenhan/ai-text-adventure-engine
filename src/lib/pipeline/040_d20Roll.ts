@@ -68,12 +68,33 @@ export function stepD20Roll(ctx: PipelineContext): void {
   const tension = state.pacingState.tensionLevel;
   const action = ctx.intent.intent;
 
+  // ── 武器 buff：找最强武器 ──
+  const bestWeapon = state.inventory
+    .filter(i => i.type === 'weapon' && i.buff)
+    .sort((a, b) => (b.buff ?? 0) - (a.buff ?? 0))[0] ?? null;
+  ctx.weaponBuff = bestWeapon?.buff ?? 0;
+
+  // ── 防具 buff：找最强防具（提前写入 ctx 供 HP 结算用） ──
+  const bestArmor = state.inventory
+    .filter(i => i.type === 'armor' && i.buff)
+    .sort((a, b) => (b.buff ?? 0) - (a.buff ?? 0))[0] ?? null;
+  ctx.armorReduction = bestArmor?.buff ?? 0;
+
   // ── 好感度修正 ──
   const { adjustedRoll, triggered, detail } = applyAffectionModifier(
     state.affection, tension, ctx.rawRoll
   );
   ctx.effectiveRoll = adjustedRoll;
   ctx.affectionTriggered = triggered;
+
+  // ── 武器修正（T≥2 combat/explore 时，weapon buff 转化为 roll 加值） ──
+  let weaponDetail = '';
+  if (ctx.weaponBuff > 0 && tension >= 2 && (action === 'combat' || action === 'explore')) {
+    // buff 是 20-80 的百分比，转化为 D20 加值：buff/100 * 5 → 1~4 点
+    const rollBonus = Math.max(1, Math.round(ctx.weaponBuff / 100 * 5));
+    ctx.effectiveRoll = Math.min(20, ctx.effectiveRoll + rollBonus);
+    weaponDetail = ` | 武器[${bestWeapon!.name}]buff=${ctx.weaponBuff}% → +${rollBonus}→${ctx.effectiveRoll}`;
+  }
 
   // ── 查表获取概率 → 计算 tier ──
   // 赶路中使用特殊概率（不走 tensionConfig 的表）
@@ -86,7 +107,7 @@ export function stepD20Roll(ctx: PipelineContext): void {
 
     ctx.tier = rollToTier(transitProbs, ctx.effectiveRoll);
     const tierLabel = ['大失败', '普通', '大成功'][ctx.tier];
-    ctx.formulaBreakdown = `原始D20=${ctx.rawRoll} | ${detail} | 有效Roll=${ctx.effectiveRoll}\n赶路概率[${transitProbs}] → T${ctx.tier} ${tierLabel}`;
+    ctx.formulaBreakdown = `原始D20=${ctx.rawRoll} | ${detail}${weaponDetail} | 有效Roll=${ctx.effectiveRoll}\n赶路概率[${transitProbs}] → T${ctx.tier} ${tierLabel}`;
     return;
   }
 
@@ -104,7 +125,7 @@ export function stepD20Roll(ctx: PipelineContext): void {
     const safeProbs: [number, number, number] = [0, 0.7, 0.3];
     ctx.tier = rollToTier(safeProbs, ctx.effectiveRoll);
     const tierLabel = ['大失败', '普通', '大成功'][ctx.tier];
-    ctx.formulaBreakdown = `原始D20=${ctx.rawRoll} | ${detail} | 有效Roll=${ctx.effectiveRoll}\n安全区探索[${safeProbs}] → T${ctx.tier} ${tierLabel}`;
+    ctx.formulaBreakdown = `原始D20=${ctx.rawRoll} | ${detail}${weaponDetail} | 有效Roll=${ctx.effectiveRoll}\n安全区探索[${safeProbs}] → T${ctx.tier} ${tierLabel}`;
     return;
   }
 
@@ -118,5 +139,5 @@ export function stepD20Roll(ctx: PipelineContext): void {
 
   const tierLabel = ['大失败', '普通', '大成功'][ctx.tier];
   const routeProbs = route ? route.probabilities : [0, 1, 0];
-  ctx.formulaBreakdown = `原始D20=${ctx.rawRoll} | ${detail} | 有效Roll=${ctx.effectiveRoll}\nT${tension}.${action}[${routeProbs}] → T${ctx.tier} ${tierLabel}`;
+  ctx.formulaBreakdown = `原始D20=${ctx.rawRoll} | ${detail}${weaponDetail} | 有效Roll=${ctx.effectiveRoll}\nT${tension}.${action}[${routeProbs}] → T${ctx.tier} ${tierLabel}`;
 }

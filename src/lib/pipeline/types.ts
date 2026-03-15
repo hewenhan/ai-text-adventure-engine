@@ -3,7 +3,7 @@
  * 所有 pipeline step 读写的中间状态都在这里定义
  */
 
-import type { GameState, IntentResult, SafetyLevel, HouseData, NodeData, ActiveBoss } from '../../types/game';
+import type { GameState, IntentResult, SafetyLevel, HouseData, NodeData, ActiveBoss, InventoryItem } from '../../types/game';
 
 // ─── D20 掷骰结果档位 ───
 export type RollTier = 0 | 1 | 2; // 0=大失败, 1=普通, 2=大成功
@@ -82,8 +82,16 @@ export interface PipelineContext {
   bossDefeatedKey: string | null;
   /** 当前位置是否存在活跃 BOSS */
   inBossZone: boolean;
+  /** 必出装备掉落标志（milestone=安全区满探索, boss=BOSS击败） */
+  guaranteedDrop: 'milestone' | 'boss' | null;
   // ── ⑧ HP 结算 ──
   newHp: number;
+  /** 防具减伤比例（0-80），由最强防具决定 */
+  armorReduction: number;
+
+  // ── ⑧½ 退敌道具 ──
+  /** 本回合是否消耗了退敌道具免罚 */
+  escapeItemUsed: InventoryItem | null;
 
   // ── ⑨ 死亡结算 ──
   newLives: number;
@@ -91,13 +99,15 @@ export interface PipelineContext {
 
 
   // ── ⑩ 任务/BGM/叙事 ──
-  newInventory: string[];
+  newInventory: InventoryItem[];
   /** 本轮是否判定为成功（影响叙事语气） */
   isSuccess: boolean;
   /** 叙事指令（发给 LLM 的系统指示） */
   narrativeInstruction: string;
   /** 选中的 BGM key */
   selectedBgmKey: string | undefined;
+  /** 武器 buff 百分比（最强武器），用于 combat 失败概率降低 */
+  weaponBuff: number;
 
   // ── 调试信息 ──
   debugFormula: string;
@@ -113,7 +123,7 @@ export interface PipelineResult {
   newNodeId: string | null;
   newHouseId: string | null;
   newProgressMap: Record<string, number>;
-  newInventory: string[];
+  newInventory: InventoryItem[];
   newIsGameOver: boolean;
   newTransitState: GameState['transitState'];
   narrativeInstruction: string;
@@ -123,6 +133,7 @@ export interface PipelineResult {
   bossSpawn: { locationKey: string; boss: ActiveBoss } | null;
   bossDefeatedKey: string | null;
   inBossZone: boolean;
+  guaranteedDrop: 'milestone' | 'boss' | null;
   affectionTriggered: 'aid' | 'sabotage' | null;
   formulaBreakdown: string;
   tensionChanged: boolean;

@@ -57,11 +57,28 @@ export const ChatMessageItem = React.memo(({ msg, characterName, playerName = 'ä
       animate={{ opacity: 1, y: 0 }}
       className={clsx(
         "flex w-full mx-auto py-1 sm:py-4 px-2 sm:px-4 gap-2 sm:gap-3 relative group",
-        msg.role === 'user' ? "justify-end" : "justify-start"
+        msg.role === 'user' ? "justify-end" : msg.role === 'narrator' ? "justify-center" : "justify-start"
       )}
     >
+      {/* Narrator message (centered, no avatar) */}
+      {msg.role === 'narrator' && (
+        <div className="max-w-[85%] bg-amber-950/30 border border-amber-600/40 rounded-xl px-5 py-3 shadow-lg shadow-amber-500/5">
+          <div className="text-xs text-amber-500 font-medium mb-1 text-center">ğŸ“œ æ—ç™½</div>
+          <div className="text-sm text-amber-200/90 leading-relaxed text-center italic">
+            <TypewriterMessage
+              text={msg.text}
+              animate={animate}
+              speed={textSpeed}
+              durationMs={durationMs}
+              isLastModelMessage={isLastModelMessage}
+              onComplete={onTypewriterComplete}
+            />
+          </div>
+        </div>
+      )}
+
       {/* AI Avatar */}
-      {msg.role !== 'user' && (
+      {msg.role === 'model' && (
         <div 
           className={`w-10 h-10 sm:w-20 sm:h-20 rounded-xl bg-zinc-800 shrink-0 overflow-hidden border border-zinc-700 flex items-center justify-center mt-1 sm:mt-5 ${portraitUrl ? 'cursor-pointer hover:ring-2 hover:ring-zinc-500 transition-all' : ''}`}
           onClick={() => { if (portraitUrl) setIsAvatarFullscreen(true); }}
@@ -74,6 +91,7 @@ export const ChatMessageItem = React.memo(({ msg, characterName, playerName = 'ä
         </div>
       )}
 
+      {msg.role !== 'narrator' && (
       <div className={clsx(
         "flex flex-col max-w-[75%]",
         msg.role === 'user' ? "items-end" : "items-start"
@@ -154,6 +172,7 @@ export const ChatMessageItem = React.memo(({ msg, characterName, playerName = 'ä
           </div>
         </div>
       </div>
+      )}
 
       {/* User Avatar */}
       {msg.role === 'user' && (

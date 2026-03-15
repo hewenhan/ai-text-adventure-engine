@@ -43,7 +43,7 @@ export function buildNotifications(
   // 探索进度 / 任务揭盲的建筑通知
   // 用 applyProgressAndReveals 模拟新状态，与旧 worldData 比较 revealed 差集
   if (state.worldData && !resolution.newTransitState) {
-    const questRevealIds = directorResult.newObjective
+    const questRevealIds = directorResult.newObjective?.targetHouseId
       ? [directorResult.newObjective.targetHouseId]
       : undefined;
     const updatedWorldData = applyProgressAndReveals(

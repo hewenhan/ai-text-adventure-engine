@@ -1,12 +1,14 @@
-import { Send } from 'lucide-react';
+import { Send, Backpack } from 'lucide-react';
 import { useState, useRef, useLayoutEffect } from 'react';
 
 interface ChatInputProps {
   isProcessing: boolean;
   onSend: (message: string) => Promise<void | boolean>;
+  onBackpackClick?: () => void;
+  inventoryCount?: number;
 }
 
-export function ChatInput({ isProcessing, onSend }: ChatInputProps) {
+export function ChatInput({ isProcessing, onSend, onBackpackClick, inventoryCount = 0 }: ChatInputProps) {
   const [input, setInput] = useState("");
 
   const handleSend = async () => {
@@ -28,7 +30,23 @@ export function ChatInput({ isProcessing, onSend }: ChatInputProps) {
 
   return (
     <div className="p-4 bg-zinc-900/50 backdrop-blur-md border-t border-zinc-800 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <div className="max-w-3xl mx-auto relative">
+      <div className="max-w-3xl mx-auto relative flex items-end gap-2">
+        {/* Backpack button */}
+        {onBackpackClick && (
+          <button
+            onClick={onBackpackClick}
+            className="relative p-2.5 mb-2 bg-zinc-950 border border-zinc-800 rounded-xl hover:bg-zinc-800 transition-colors flex-shrink-0"
+            title="背包"
+          >
+            <Backpack className="w-5 h-5 text-amber-400" />
+            {inventoryCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-black text-[10px] font-bold rounded-full flex items-center justify-center">
+                {inventoryCount}
+              </span>
+            )}
+          </button>
+        )}
+        <div className="flex-1 relative">
         <textarea
           ref={textareaRef}
           value={input}
@@ -52,6 +70,7 @@ export function ChatInput({ isProcessing, onSend }: ChatInputProps) {
         >
           <Send className="w-4 h-4" />
         </button>
+        </div>
       </div>
     </div>
   );

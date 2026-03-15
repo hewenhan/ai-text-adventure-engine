@@ -52,9 +52,10 @@ export function stepBossCheck(ctx: PipelineContext): void {
   const tensionDropped = ctx.newTensionLevel < boss.tensionLevel;
 
   if (wasCombat && wasCrit && tensionDropped) {
-    // BOSS 被击败！
+    // BOSS 被击败！必出装备掉落
     ctx.bossDefeatedKey = bossLocationKey;
     ctx.inBossZone = false;
+    ctx.guaranteedDrop = 'boss';
 
     // 将位置标记为 safe
     if (ctx.newHouseId) {

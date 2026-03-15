@@ -1,5 +1,5 @@
 export { buildIntentContext, type IntentContext } from './buildIntentContext';
-export { maybeEscalateToSeekQuest, runDirector, type DirectorResult } from './directorSystem';
+export { maybeEscalateToSeekQuest, runDirector, advanceQuestChain, type DirectorResult } from './directorSystem';
 export { applyDebugOverrides, applyNarrativeOverrides, buildStateUpdate, applyDebugDirectWrites } from './applyResolution';
 export { buildNotifications } from './buildNotifications';
 export { buildStoryPrompt, type StoryPromptInput } from './buildStoryPrompt';

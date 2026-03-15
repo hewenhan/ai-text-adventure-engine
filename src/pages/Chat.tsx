@@ -21,8 +21,10 @@ import { DriveToast } from '../components/DriveToast';
 import { FakeProgressBar, FakeProgressBarHandle } from '../components/FakeProgressBar';
 import { useRetryDialog } from '../components/RetryDialog';
 import { FloatingObjective } from '../components/FloatingObjective';
+import { InventoryPanel } from '../components/InventoryPanel';
+import { DiscardPanel } from '../components/DiscardPanel';
 import { uploadImageToDrive, getImageUrlByName } from '../lib/drive';
-import { initializeWorld, fetchCustomLoadingMessages, generateMapImage, generateCharacterPortrait } from '../services/aiService';
+import { initializeWorld, fetchCustomLoadingMessages, generateMapImage, generateCharacterPortrait, generateEquipmentPresets } from '../services/aiService';
 
 export default function Chat() {
   const { state, updateState, exportSave } = useGame();
@@ -30,6 +32,7 @@ export default function Chat() {
   const navigate = useNavigate();
   const [showStatus, setShowStatus] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [showInventory, setShowInventory] = useState(false);
   const [textSpeed, setTextSpeed] = useState<TextSpeed>('normal');
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
@@ -72,7 +75,7 @@ export default function Chat() {
   // 已播放过打字动画的消息 ID 集合（防止 Virtuoso 卸载/重挂时重新打字）
   const animatedIdsRef = useRef<Set<string>>(new Set(state.history.map(m => m.id)));
 
-  const { isProcessing, handleTurn, flushPendingNotifications } = useChatLogic();
+  const { isProcessing, handleTurn, flushPendingNotifications, pendingBagItem, resolveBagDiscard } = useChatLogic();
 
   // ── Deferred display snapshot ──
   // Progress bar & objective only update after the last typewriter message completes
@@ -238,6 +241,11 @@ export default function Chat() {
               : {})
           });
 
+          // Generate equipment presets in parallel (non-blocking for world init overlay)
+          generateEquipmentPresets(state.worldview, state.language)
+            .then(presets => updateState({ equipmentPresets: presets }))
+            .catch(e => console.error('Equipment presets generation failed', e));
+
           // Generate map image in background (non-blocking, with retry)
           doGenerateMap(result.worldData, state.worldview, finalArtStyle);
 
@@ -355,18 +363,27 @@ export default function Chat() {
       }
 
       const newHp = lastMessage?.hp ?? (newHistory.length === 0 ? INITIAL_STATE.hp : state.hp);
-      const newInventory = lastMessage?.inventory ?? (newHistory.length === 0 ? INITIAL_STATE.inventory : state.inventory);
       const newStatus = lastMessage?.status ?? (newHistory.length === 0 ? INITIAL_STATE.status : state.status);
 
       updateState({ 
         history: newHistory,
         pacingState: newPacingState,
         hp: newHp,
-        inventory: newInventory,
         status: newStatus
       });
     }
-  }, [state.history, state.pacingState, state.hp, state.inventory, state.status, updateState]);
+  }, [state.history, state.pacingState, state.hp, state.status, updateState]);
+
+  const handleDiscardItem = useCallback((itemId: string) => {
+    updateState(prev => ({
+      inventory: prev.inventory.filter(i => i.id !== itemId),
+    }));
+  }, [updateState]);
+
+  const handleUseItem = useCallback((item: import('../types/game').InventoryItem) => {
+    setShowInventory(false);
+    handleTurn(`使用【${item.name}】`);
+  }, [handleTurn]);
 
   const characterName = state.companionProfile.name || 'AI';
 
@@ -683,7 +700,13 @@ export default function Chat() {
         </AnimatePresence>
         <AnimatePresence>
           {displaySnapshot.currentObjective && (
-            <FloatingObjective description={displaySnapshot.currentObjective.description} constraintsRef={chatAreaRef} />
+            <FloatingObjective
+              description={displaySnapshot.currentObjective.description}
+              targetLocationName={displaySnapshot.currentObjective.targetLocationName}
+              constraintsRef={chatAreaRef}
+              questChain={state.questChain}
+              currentStageIndex={state.currentQuestStageIndex}
+            />
           )}
         </AnimatePresence>
         <Virtuoso
@@ -757,7 +780,12 @@ export default function Chat() {
         />
       </div>
 
-      <ChatInput isProcessing={isProcessing} onSend={handleTurn} />
+      <ChatInput
+        isProcessing={isProcessing}
+        onSend={handleTurn}
+        onBackpackClick={() => setShowInventory(true)}
+        inventoryCount={state.inventory.length}
+      />
 
       <AnimatePresence>
         {showStatus && (
@@ -770,6 +798,20 @@ export default function Chat() {
           <MapOverlay state={state} onClose={() => setShowMap(false)} />
         )}
       </AnimatePresence>
+
+      <InventoryPanel
+        inventory={state.inventory}
+        isOpen={showInventory}
+        onClose={() => setShowInventory(false)}
+        onDiscard={handleDiscardItem}
+        onUse={handleUseItem}
+      />
+
+      <DiscardPanel
+        incomingItem={pendingBagItem}
+        inventory={state.inventory}
+        onDiscard={resolveBagDiscard}
+      />
 
       <AnimatePresence>
         {showProfileModal && (
@@ -786,10 +828,10 @@ export default function Chat() {
       </AnimatePresence>
       
       <AnimatePresence>
-        {isFleshingOutCharacter && <FleshingOutOverlay ref={characterProgressRef} />}
+        {isFleshingOutCharacter && <FleshingOutOverlay ref={characterProgressRef} loadingMessages={state.loadingMessages} />}
       </AnimatePresence>
       <AnimatePresence>
-        {isGeneratingWorld && <FleshingOutOverlay ref={worldProgressRef} isWorld />}
+        {isGeneratingWorld && <FleshingOutOverlay ref={worldProgressRef} isWorld loadingMessages={state.loadingMessages} />}
       </AnimatePresence>
 
       <DebugOverlay state={state} onUpdateState={updateState} />

@@ -1,7 +1,7 @@
 import { ai, TEXT_MODEL, PRO_MODEL, PRO_IMAGE_MODEL, IMAGE_MODEL, LITE_MODEL } from '../lib/gemini';
 import { HarmCategory, HarmBlockThreshold } from '@google/genai';
-import type { IntentResult, WorldData, CharacterProfile, NodeData, GameState } from '../types/game';
-import { normalizeConnections } from '../types/game';
+import type { IntentResult, WorldData, CharacterProfile, NodeData, GameState, InventoryItem, Rarity, SafetyLevel } from '../types/game';
+import { normalizeConnections, EQUIPMENT_BUFF_TABLE } from '../types/game';
 
 /**
  * 宏观寻路：BFS 找到从当前位置到目标的下一步微操。
@@ -426,6 +426,233 @@ export async function fetchCustomLoadingMessages(worldview: string, language: 'z
 }
 
 /**
+ * 生成装备预设池：25 武器 + 25 防具（每稀有度各 5 件）
+ * buff 值来自 EQUIPMENT_BUFF_TABLE
+ */
+export async function generateEquipmentPresets(
+  worldview: string,
+  language: 'zh' | 'en' = 'zh'
+): Promise<InventoryItem[]> {
+  const langInstruction = language === 'zh' ? 'All names and descriptions MUST be in Chinese.' : 'All content MUST be in English.';
+  const rarities: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+
+  const prompt = `You are an expert RPG item designer.
+
+Worldview: "${worldview}"
+
+Generate equipment items for this world. You need to create:
+- 25 WEAPONS (5 per rarity tier)
+- 25 ARMOR pieces (5 per rarity tier)
+
+Rarity tiers: common, uncommon, rare, epic, legendary
+
+For each item, provide:
+- name: A creative, worldview-fitting name
+- description: A short 1-sentence description of the item's lore/appearance
+- icon: A single emoji that represents the weapon or armor piece
+
+IMPORTANT: Items must feel like they belong in this specific world. A cyberpunk world should have plasma rifles and nano-armor, not medieval swords.
+
+${langInstruction}
+
+Return ONLY a JSON object with this structure (no markdown):
+{
+  "weapons": {
+    "common": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items],
+    "uncommon": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items],
+    "rare": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items],
+    "epic": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items],
+    "legendary": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items]
+  },
+  "armors": {
+    "common": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items],
+    "uncommon": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items],
+    "rare": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items],
+    "epic": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items],
+    "legendary": [{ "name": "...", "description": "...", "icon": "..." }, ...5 items]
+  }
+}`;
+
+  const result = await ai.models.generateContent({
+    model: TEXT_MODEL,
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: { responseMimeType: 'application/json' }
+  });
+
+  const text = result.text;
+  if (!text) throw new Error('Failed to generate equipment presets');
+
+  const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  const parsed = JSON.parse(cleaned);
+
+  const items: InventoryItem[] = [];
+  let idCounter = 0;
+
+  for (const equipType of ['weapons', 'armors'] as const) {
+    const itemType: 'weapon' | 'armor' = equipType === 'weapons' ? 'weapon' : 'armor';
+    for (const rarity of rarities) {
+      const buffValues = EQUIPMENT_BUFF_TABLE[rarity];
+      const rawItems = parsed[equipType]?.[rarity] || [];
+      for (let i = 0; i < Math.min(5, rawItems.length); i++) {
+        const raw = rawItems[i];
+        items.push({
+          id: `eq_${itemType}_${rarity}_${idCounter++}`,
+          name: raw.name || `Unknown ${itemType}`,
+          type: itemType,
+          description: raw.description || '',
+          rarity,
+          icon: raw.icon || (itemType === 'weapon' ? '⚔️' : '🛡️'),
+          quantity: 1,
+          buff: buffValues[i] ?? buffValues[0],
+        });
+      }
+    }
+  }
+
+  return items;
+}
+
+/**
+ * 生成任务链（3-5 环）+ 每环所需道具
+ */
+export async function generateQuestChain(
+  worldview: string,
+  worldData: WorldData,
+  currentNodeId: string,
+  language: 'zh' | 'en' = 'zh'
+): Promise<{ stages: Array<{ description: string; requiredItems: { name: string; id: string }[] }>, targetLocations: { nodeId: string; houseId: string; locationName: string }[] }> {
+  const langInstruction = language === 'zh' ? 'All text MUST be in Chinese.' : 'All content MUST be in English.';
+
+  // Pick 3-5 target locations (TS side, no adjacent repeats)
+  // Include both node-level (outdoors) and house-level targets
+  const stageCount = 3 + Math.floor(Math.random() * 3); // 3-5
+
+  const allTargets: { nodeId: string; houseId: string; locationName: string; nodeName: string; locationType: string; safety: SafetyLevel }[] = [];
+
+  for (const n of worldData.nodes) {
+    if (n.id === currentNodeId) continue;
+    // Node-level target (outdoors)
+    allTargets.push({
+      nodeId: n.id, houseId: '', locationName: n.name,
+      nodeName: n.name, locationType: n.type, safety: n.safetyLevel,
+    });
+    // House-level targets
+    for (const h of n.houses) {
+      allTargets.push({
+        nodeId: n.id, houseId: h.id, locationName: `${n.name} · ${h.name}`,
+        nodeName: n.name, locationType: h.type, safety: n.safetyLevel,
+      });
+    }
+  }
+
+  const targetLocations: typeof allTargets = [];
+  for (let i = 0; i < stageCount && allTargets.length > 0; i++) {
+    const candidates = allTargets.filter(t =>
+      targetLocations.length === 0 || t.nodeId !== targetLocations[targetLocations.length - 1].nodeId
+    );
+    const pool = candidates.length > 0 ? candidates : allTargets;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    targetLocations.push(pick);
+  }
+
+  const locationDesc = targetLocations.map((t, i) =>
+    `Stage ${i + 1}: ${t.locationName} (${t.locationType}, danger: ${t.safety})`
+  ).join('\n');
+
+  const prompt = `You are a quest designer for an RPG text adventure.
+
+Worldview: "${worldview}"
+
+The player needs a quest chain with ${targetLocations.length} stages. For each stage, the player must travel to a specific location and use the correct quest item there.
+
+Target Locations (pre-assigned):
+${locationDesc}
+
+For each stage, generate:
+1. description: A vivid, specific quest objective description (2-3 sentences explaining WHY the player needs to go there and WHAT they need to accomplish)
+2. requiredItem: EXACTLY ONE quest item needed for this stage. The item has a name and a brief description.
+
+IMPORTANT: Each stage must have EXACTLY ONE required item, no more, no less.
+
+Make the quest chain tell a coherent escalating story across all stages.
+
+${langInstruction}
+
+Return ONLY a JSON object (no markdown):
+{
+  "stages": [
+    {
+      "description": "stage objective description...",
+      "requiredItem": { "name": "item name", "description": "item description" }
+    }
+  ]
+}`;
+
+  const result = await ai.models.generateContent({
+    model: TEXT_MODEL,
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: { responseMimeType: 'application/json' }
+  });
+
+  const text = result.text;
+  if (!text) throw new Error('Failed to generate quest chain');
+
+  const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  const parsed = JSON.parse(cleaned);
+
+  let itemIdCounter = 0;
+  const stages = (parsed.stages || []).map((s: any, i: number) => {
+    // Support both requiredItem (single) and requiredItems (array) from AI
+    const item = s.requiredItem || (s.requiredItems && s.requiredItems[0]) || { name: `任务道具 ${i + 1}` };
+    return {
+      description: s.description || `前往目标地点 ${i + 1}`,
+      requiredItems: [{
+        name: item.name || `任务道具 ${itemIdCounter}`,
+        id: `quest_item_${itemIdCounter++}`,
+      }],
+    };
+  });
+
+  return {
+    stages,
+    targetLocations: targetLocations.map(t => ({ nodeId: t.nodeId, houseId: t.houseId, locationName: t.locationName })),
+  };
+}
+
+/**
+ * 任务完成旁白：由 AI 生成一段颁奖式的任务完成叙述
+ */
+export async function generateQuestCompletionNarration(
+  worldview: string,
+  questDescription: string,
+  companionName: string,
+  language: 'zh' | 'en' = 'zh'
+): Promise<string> {
+  const langInstruction = language === 'zh' ? '用中文回复。' : 'Reply in English.';
+  const prompt = `You are the narrator of an RPG text adventure. The player and their companion ${companionName} have just completed a multi-stage quest chain.
+
+Worldview: "${worldview}"
+Completed Quest: "${questDescription}"
+
+Write a short (2-3 sentences), dramatic, third-person narrator passage celebrating the completion of this quest chain. Be poetic but concise. Do NOT use dialogue — it's pure narration.
+
+${langInstruction}
+
+Return ONLY the narrator text, no JSON, no markdown.`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    });
+    return result.text?.trim() || '任务链已完成。新的冒险即将开始。';
+  } catch (e) {
+    console.error('Quest completion narration failed:', e);
+    return '任务链已完成。新的冒险即将开始。';
+  }
+}
+
+/**
  * Step 1 of the two-step pipeline: Intent Router.
  * Uses a fast model to classify the user's action into an intent category.
  */
@@ -492,13 +719,17 @@ You MUST evaluate the player's input through this top-down pipeline. Match the F
 - **Condition**: Player explicitly mentions heading to the Current Objective, OR uses vague journey verbs (e.g., "出发", "继续赶路", "let's hit the road") while already 'outdoors' or ready to move on.
 - **Intent**: "seek_quest"
 - **TargetId**: "current_objective" (The backend engine handles the pathfinding).
-
+**STEP 4.5: ITEM USAGE (The "Use Item" Rule)**
+- **Condition**: Player explicitly attempts to use, activate, or deploy an item from their backpack (e.g., "使用XXX", "用这个道具", "activate the shield", "吃药").
+- **Intent**: "use_item"
+- **TargetId**: null
+- **itemName**: The name of the item player wants to use.
 **STEP 4: PHYSICAL INTERACTION & EXPLORATION (The "Hands-on" Rule)**
 - **Condition**: Player acts on the immediate environment (e.g., "搜刮尸体", "踹门", "检查箱子") WITHOUT intending to travel away.
 - **Intent**: "explore"
 - **TargetId**: null
 
-**STEP 5: ROLEPLAY & STANDBY (The "Idle" Rule)**
+**STEP 6: ROLEPLAY & STANDBY (The "Idle" Rule)**
 - **Condition**: Pure conversation, emotional reactions, resting, or observations without physical progression.
 - **Intent**: "idle" (or "combat" / "suicidal_idle" if heavily applicable)
 - **TargetId**: null
@@ -508,9 +739,10 @@ Player Input: "${userInput}"
 
 Output strictly in this JSON schema. Return ONLY JSON, no markdown formatting:
 {
-  "intent": "<ONE of the 5 categories above>",
+  "intent": "<ONE of the categories above>",
   "targetId": "<EXACT ID (e.g., 'n2'), 'current_objective' if seek_quest, 'outdoors' if exiting, or null>",
-  "direction": "<'forward', 'back', or null>"
+  "direction": "<'forward', 'back', or null>",
+  "itemName": "<Name of item to use, or null if not use_item intent>"
 }`;
 
   const result = await ai.models.generateContent({
@@ -525,10 +757,10 @@ Output strictly in this JSON schema. Return ONLY JSON, no markdown formatting:
   try {
     const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleaned);
-    const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest'];
+    const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest', 'use_item'];
     if (validIntents.includes(parsed.intent)) {
       const direction = parsed.direction === 'back' ? 'back' as const : parsed.direction === 'forward' ? 'forward' as const : undefined;
-      return { intent: parsed.intent, targetId: parsed.targetId || null, direction };
+      return { intent: parsed.intent, targetId: parsed.targetId || null, direction, itemName: parsed.itemName || undefined };
     }
   } catch (e) {
     console.error("Intent extraction parse error, attempting regex fallback", e);
@@ -537,10 +769,10 @@ Output strictly in this JSON schema. Return ONLY JSON, no markdown formatting:
     if (braceMatch) {
       try {
         const fallbackParsed = JSON.parse(braceMatch[0]);
-        const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest'];
+        const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest', 'use_item'];
         if (validIntents.includes(fallbackParsed.intent)) {
           const direction = fallbackParsed.direction === 'back' ? 'back' as const : fallbackParsed.direction === 'forward' ? 'forward' as const : undefined;
-          return { intent: fallbackParsed.intent, targetId: fallbackParsed.targetId || null, direction };
+          return { intent: fallbackParsed.intent, targetId: fallbackParsed.targetId || null, direction, itemName: fallbackParsed.itemName || undefined };
         }
       } catch (e2) {
         console.error("Regex fallback also failed", e2);
@@ -548,7 +780,7 @@ Output strictly in this JSON schema. Return ONLY JSON, no markdown formatting:
     }
     // Last resort: return lastIntent if available
     if (lastIntent) {
-      const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest'];
+      const validIntents = ['idle', 'explore', 'combat', 'suicidal_idle', 'move', 'seek_quest', 'use_item'];
       if (validIntents.includes(lastIntent)) {
         console.warn("Using lastIntent as fallback:", lastIntent);
         return { intent: lastIntent as IntentResult['intent'], targetId: null };

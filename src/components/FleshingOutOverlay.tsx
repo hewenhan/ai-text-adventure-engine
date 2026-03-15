@@ -1,18 +1,27 @@
-import { forwardRef } from 'react';
-import { motion } from 'motion/react';
+import { forwardRef, useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Loader2 } from 'lucide-react';
 import { FakeProgressBar, FakeProgressBarHandle } from './FakeProgressBar';
+import { DEFAULT_LOADING_MESSAGES } from '../types/game';
 
 interface FleshingOutOverlayProps {
   isWorld?: boolean;
+  loadingMessages?: string[];
 }
 
-export const FleshingOutOverlay = forwardRef<FakeProgressBarHandle, FleshingOutOverlayProps>(({ isWorld }, ref) => {
+export const FleshingOutOverlay = forwardRef<FakeProgressBarHandle, FleshingOutOverlayProps>(({ isWorld, loadingMessages }, ref) => {
   const duration = isWorld ? 50000 : 45000;
   const label = isWorld ? '正在构建世界...' : '正在融入世界观...';
-  const subLabel = isWorld 
-    ? '正在根据世界设定生成地图拓扑结构，请稍候。'
-    : '正在根据世界设定补全角色的详细背景、性格与特长，请稍候。';
+
+  const messages = loadingMessages && loadingMessages.length > 0 ? loadingMessages : DEFAULT_LOADING_MESSAGES;
+  const [currentMsg, setCurrentMsg] = useState(() => messages[Math.floor(Math.random() * messages.length)]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentMsg(messages[Math.floor(Math.random() * messages.length)]);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [messages]);
 
   return (
     <motion.div 
@@ -40,7 +49,18 @@ export const FleshingOutOverlay = forwardRef<FakeProgressBarHandle, FleshingOutO
         />
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mx-auto" />
         <h3 className="text-lg font-medium">{label}</h3>
-        <p className="text-sm text-zinc-400">{subLabel}</p>
+        <AnimatePresence mode="wait">
+          <motion.p
+            key={currentMsg}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            transition={{ duration: 0.2 }}
+            className="text-sm text-zinc-400"
+          >
+            {currentMsg}
+          </motion.p>
+        </AnimatePresence>
       </motion.div>
     </motion.div>
   );

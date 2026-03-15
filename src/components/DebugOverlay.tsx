@@ -309,7 +309,7 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ state, onUpdateState
                         onUpdateState({
                           debugOverrides: {
                             ...state.debugOverrides,
-                            forceQuest: { targetNodeId: rn.id, targetHouseId: rh.id, description: `[DEBUG] 前往${rn.name}·${rh.name}` }
+                            forceQuest: { targetNodeId: rn.id, targetHouseId: rh.id, targetLocationName: `${rn.name}·${rh.name}`, description: `[DEBUG] 前往${rn.name}·${rh.name}` }
                           }
                         });
                       }

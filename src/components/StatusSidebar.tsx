@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { X, Heart, Shield, MapPin, Target } from 'lucide-react';
-import { GameState } from '../types/game';
+import { GameState, RARITY_COLORS } from '../types/game';
 import { useAuth } from '../contexts/AuthContext';
 import { getImageUrlByName } from '../lib/drive';
 import { useEffect, useState, useMemo } from 'react';
@@ -155,14 +155,20 @@ export function StatusSidebar({ state, onClose }: StatusSidebarProps) {
 
           {/* Inventory */}
           <div>
-            <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">物品栏</h3>
+            <h3 className="text-sm font-medium text-zinc-400 mb-2 uppercase tracking-wider">背包 ({state.inventory.length}/10)</h3>
             {state.inventory.length === 0 ? (
               <div className="text-zinc-600 italic text-sm">空</div>
             ) : (
               <ul className="space-y-2">
-                {state.inventory.map((item: string, i: number) => (
-                  <li key={i} className="bg-zinc-950 border border-zinc-800 p-2 rounded-lg text-sm">
-                    {item}
+                {state.inventory.map((item) => (
+                  <li key={item.id} className="bg-zinc-950 border p-2 rounded-lg text-sm" style={{ borderColor: RARITY_COLORS[item.rarity] }}>
+                    <div className="flex items-center gap-2">
+                      <span>{item.icon}</span>
+                      <span className="font-medium" style={{ color: RARITY_COLORS[item.rarity] }}>{item.name}</span>
+                      {item.quantity > 1 && <span className="text-zinc-500">x{item.quantity}</span>}
+                      {item.buff != null && <span className="text-xs text-amber-400 ml-auto">+{item.buff}%</span>}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1">{item.description}</div>
                   </li>
                 ))}
               </ul>

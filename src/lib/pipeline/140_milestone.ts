@@ -30,11 +30,12 @@ export function stepMilestone(ctx: PipelineContext): void {
     const bossTension = bossTensionFromSafety(safety);
 
     if (!bossTension) {
-      // safe 建筑：直接标记完成
+      // safe 建筑：直接标记完成 + 必出装备
       ctx.newTensionLevel = 0;
       ctx.houseSafetyUpdate = { houseId: state.currentHouseId, newSafetyLevel: 'safe' };
       ctx.isInSafeZone = true;
       ctx.tensionChanged = ctx.newTensionLevel !== state.pacingState.tensionLevel;
+      ctx.guaranteedDrop = 'milestone';
       ctx.narrativeInstruction += '\n【系统强制 - 里程碑】：该建筑已被彻底搜索，确认安全无威胁。主角可安心休整。';
     } else {
       // 有威胁建筑：创建持久 BOSS
@@ -54,10 +55,11 @@ export function stepMilestone(ctx: PipelineContext): void {
     const bossTension = bossTensionFromSafety(safety);
 
     if (!bossTension) {
-      // safe 区域：直接完成
+      // safe 区域：直接完成 + 必出装备
       ctx.newTensionLevel = 0;
       ctx.isInSafeZone = true;
       ctx.tensionChanged = ctx.newTensionLevel !== state.pacingState.tensionLevel;
+      ctx.guaranteedDrop = 'milestone';
       ctx.narrativeInstruction += '\n【系统强制 - 里程碑】：区域已被彻底探索，确认安全无威胁。';
     } else {
       // 有威胁区域：创建持久 BOSS
